@@ -136,11 +136,18 @@ function buildCloseUserVolumeIx(user: PublicKey): TransactionInstruction {
   });
 }
 
-/** claim_cashback_v2 then close_user_volume_accumulator (matches claimfreesol / CLosey flow). */
+/** claim_cashback_v2 (only if there is excess cashback) then close_user_volume_accumulator. */
 export function buildPumpCashbackInstructions(
-  user: PublicKey
+  user: PublicKey,
+  options?: { includeClaim?: boolean }
 ): TransactionInstruction[] {
-  return [buildClaimCashbackV2Ix(user), buildCloseUserVolumeIx(user)];
+  const includeClaim = options?.includeClaim ?? true;
+  const ixs: TransactionInstruction[] = [];
+  if (includeClaim) {
+    ixs.push(buildClaimCashbackV2Ix(user));
+  }
+  ixs.push(buildCloseUserVolumeIx(user));
+  return ixs;
 }
 
 /** True if instruction data starts with a known Pump cashback/close discriminator. */

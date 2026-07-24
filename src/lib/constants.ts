@@ -28,13 +28,19 @@ export const CLOSES_PER_TX = 20;
 export const RENT_PER_ACCOUNT_SOL = 0.00203928;
 
 /** Max rows returned by /api/recent-claims for the live feed. */
-export const LEDGER_DISPLAY_LIMIT = 15;
+export const LEDGER_DISPLAY_LIMIT = 12;
 
 /** Client-side mobile feed cap (desktop shows full LEDGER_DISPLAY_LIMIT). */
 export const LEDGER_MOBILE_LIMIT = 8;
 
-/** Max fee-wallet signatures scanned when building all-time stats. */
-export const LEDGER_HISTORY_CAP = 500;
+/**
+ * Max fee-wallet signatures to pull for stats + feed.
+ * Kept small so public RPC stays under rate limits (efficiency > completeness).
+ */
+export const LEDGER_HISTORY_CAP = 40;
+
+/** How many of those signatures we fully parse into claim rows. */
+export const LEDGER_PARSE_LIMIT = 24;
 
 export const SOLSCAN_TX = (sig: string) => `https://solscan.io/tx/${sig}`;
 export const SOLSCAN_ACCOUNT = (addr: string) =>

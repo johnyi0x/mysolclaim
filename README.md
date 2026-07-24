@@ -17,10 +17,8 @@ Next.js (App Router) · TypeScript · Tailwind CSS v3 · `@solana/web3.js` ·
 | `HELIUS_RPC_URL` | optional fallback | Private RPC URL+key (server-only; used only if public fails) |
 
 **RPC order:** public Solana RPC first → `HELIUS_RPC_URL` only if public fails.
-
-**~230 claims/day:** usually fine on public RPC alone (~few thousand RPC
-calls/day vs ~100 req / 10s / IP official limit). Spikes and heavy ledger
-parsing can still 429 — keep Helius as optional fallback.
+JSON-RPC **batches are never sent** (free Helius compatible). Ledger fetch is
+kept light (~40 sigs / ~24 parses) so public rate limits are less likely.
 
 ## Anti-spam
 

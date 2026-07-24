@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { PublicKey, type ParsedTransactionWithMeta } from "@solana/web3.js";
+import {
+  PublicKey,
+  type Connection,
+  type ParsedTransactionWithMeta,
+} from "@solana/web3.js";
 import {
   clientKey,
   isAllowedOrigin,
@@ -11,6 +15,7 @@ import { PUMP_PROGRAM_ID } from "@/lib/pump-cashback";
 import {
   LEDGER_DISPLAY_LIMIT,
   LEDGER_HISTORY_CAP,
+  LEDGER_PARSE_LIMIT,
 } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -117,7 +122,31 @@ function classifyAction(tx: ParsedTransactionWithMeta): {
 }
 
 /**
+ * One RPC call per signature — never getParsedTransactions (JSON-RPC batch).
+ * Free Helius rejects batches; public RPC also hates big bursts.
+ */
+async function getParsedTransactionsSingle(
+  connection: Connection,
+  signatures: string[]
+): Promise<(ParsedTransactionWithMeta | null)[]> {
+  const out: (ParsedTransactionWithMeta | null)[] = [];
+  for (const signature of signatures) {
+    try {
+      const tx = await connection.getParsedTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: "confirmed",
+      });
+      out.push(tx);
+    } catch {
+      out.push(null);
+    }
+  }
+  return out;
+}
+
+/**
  * Public read-only ledger. Fee wallet history IS the database.
+ * Light fetch: public RPC first, free-Helius-safe (no batches).
  */
 export async function GET(req: Request) {
   if (!isAllowedOrigin(req)) {
@@ -159,59 +188,43 @@ export async function GET(req: Request) {
     const body = await withRpcFallback(async (connection) => {
       const feeWallet = new PublicKey(feeWalletAddress);
 
-      type Sig = Awaited<
-        ReturnType<typeof connection.getSignaturesForAddress>
-      >[number];
-      const allSigs: Sig[] = [];
-      let before: string | undefined;
-      while (allSigs.length < LEDGER_HISTORY_CAP) {
-        const batch = await connection.getSignaturesForAddress(feeWallet, {
-          limit: Math.min(100, LEDGER_HISTORY_CAP - allSigs.length),
-          before,
-        });
-        if (batch.length === 0) break;
-        allSigs.push(...batch);
-        before = batch[batch.length - 1].signature;
-        if (batch.length < 100) break;
-      }
-
+      // Single page of signatures — enough for a live feed + rough stats.
+      const allSigs = await connection.getSignaturesForAddress(feeWallet, {
+        limit: LEDGER_HISTORY_CAP,
+      });
       const successful = allSigs.filter((s) => !s.err);
-      // Parse up to 200 newest successful fee-wallet txs for stats + feed.
-      const toParse = successful.slice(0, Math.min(successful.length, 200));
+      const toParse = successful.slice(0, LEDGER_PARSE_LIMIT);
+
+      const txs = await getParsedTransactionsSingle(
+        connection,
+        toParse.map((s) => s.signature)
+      );
 
       const claims: RecentClaim[] = [];
-      for (let offset = 0; offset < toParse.length; offset += 40) {
-        const slice = toParse.slice(offset, offset + 40);
-        const txs = await connection.getParsedTransactions(
-          slice.map((s) => s.signature),
-          { maxSupportedTransactionVersion: 0 }
-        );
+      for (let i = 0; i < txs.length; i++) {
+        const tx = txs[i];
+        if (!tx || tx.meta?.err) continue;
 
-        for (let i = 0; i < txs.length; i++) {
-          const tx = txs[i];
-          if (!tx || tx.meta?.err) continue;
+        const { action, accountsClosed } = classifyAction(tx);
+        if (!action) continue;
 
-          const { action, accountsClosed } = classifyAction(tx);
-          if (!action) continue;
+        const keys = tx.transaction.message.accountKeys;
+        const feePayerIndex = keys.findIndex((k) => k.signer);
+        if (feePayerIndex === -1) continue;
 
-          const keys = tx.transaction.message.accountKeys;
-          const feePayerIndex = keys.findIndex((k) => k.signer);
-          if (feePayerIndex === -1) continue;
+        const pre = tx.meta?.preBalances?.[feePayerIndex] ?? 0;
+        const post = tx.meta?.postBalances?.[feePayerIndex] ?? 0;
+        const reclaimedLamports = post - pre;
+        if (reclaimedLamports <= 0) continue;
 
-          const pre = tx.meta?.preBalances?.[feePayerIndex] ?? 0;
-          const post = tx.meta?.postBalances?.[feePayerIndex] ?? 0;
-          const reclaimedLamports = post - pre;
-          if (reclaimedLamports <= 0) continue;
-
-          claims.push({
-            signature: slice[i].signature,
-            blockTime: tx.blockTime ?? slice[i].blockTime ?? 0,
-            wallet: keys[feePayerIndex].pubkey.toBase58(),
-            accountsClosed,
-            reclaimedLamports,
-            action,
-          });
-        }
+        claims.push({
+          signature: toParse[i].signature,
+          blockTime: tx.blockTime ?? toParse[i].blockTime ?? 0,
+          wallet: keys[feePayerIndex].pubkey.toBase58(),
+          accountsClosed,
+          reclaimedLamports,
+          action,
+        });
       }
 
       const nowSec = Math.floor(Date.now() / 1000);
@@ -249,7 +262,7 @@ export async function GET(req: Request) {
     return NextResponse.json(body, {
       headers: {
         ...rateLimitHeaders(limited, LIMIT),
-        ...cacheHeaders(60),
+        ...cacheHeaders(120),
       },
     });
   } catch (err) {

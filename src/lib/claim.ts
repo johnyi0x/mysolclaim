@@ -84,7 +84,10 @@ export async function buildPumpCashbackTransaction(
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 })
   );
 
-  for (const ix of buildPumpCashbackInstructions(user)) {
+  for (const ix of buildPumpCashbackInstructions(user, {
+    // Skip claim when there's nothing above rent — close alone is enough.
+    includeClaim: opportunity.cashbackLamports > 0,
+  })) {
     tx.add(ix);
   }
 

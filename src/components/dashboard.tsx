@@ -155,7 +155,12 @@ export function Dashboard() {
     setProgress(`Simulating ${label}…`);
     const sim = await connection.simulateTransaction(batch.transaction);
     if (sim.value.err) {
-      throw new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`);
+      const logs = (sim.value.logs ?? []).slice(-8).join(" | ");
+      throw new Error(
+        `Simulation failed: ${JSON.stringify(sim.value.err)}${
+          logs ? ` — ${logs}` : ""
+        }`
+      );
     }
 
     setProgress(`Approve ${label} in your wallet…`);
@@ -225,13 +230,17 @@ export function Dashboard() {
       }
     } catch (err) {
       console.error(err);
+      const raw = err instanceof Error ? err.message : String(err);
       const message =
-        err instanceof Error &&
-        /reject|User rejected|cancelled/i.test(err.message)
+        /reject|User rejected|cancelled/i.test(raw)
           ? "You declined the transaction in your wallet."
-          : err instanceof Error && /Simulation failed/i.test(err.message)
-            ? "Simulation failed — nothing was signed. Rescan and try again."
-            : "Something went wrong. Any txs you already approved are listed below.";
+          : /Simulation failed/i.test(raw)
+            ? raw.length > 280
+              ? `${raw.slice(0, 280)}…`
+              : raw
+            : /insufficient|0x1|InsufficientFunds/i.test(raw)
+              ? "Not enough SOL in your wallet to cover network fees. Keep a tiny bit of SOL unlocked, then retry."
+              : "Something went wrong. Any txs you already approved are listed below.";
       setClaimError(message);
     }
 
