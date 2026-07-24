@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { findEmptyTokenAccounts } from "@/lib/scan";
 import {
   clientKey,
@@ -7,6 +7,7 @@ import {
   rateLimit,
   rateLimitHeaders,
 } from "@/lib/rate-limit";
+import { withRpcFallback } from "@/lib/rpc";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ const WINDOW_MS = 60_000;
 
 /**
  * Rate-limited empty-account scan.
- * Uses HELIUS_RPC_URL if set; otherwise Solana public RPC (rate-limited).
+ * Tries public Solana RPC first, then HELIUS_RPC_URL if configured.
  */
 export async function GET(req: Request) {
   if (!isAllowedOrigin(req)) {
@@ -51,7 +52,6 @@ export async function GET(req: Request) {
     );
   }
 
-  // Per-wallet throttle (same IP can still only scan a given wallet so often).
   const walletLimited = rateLimit(`scan-wallet:${owner.toBase58()}`, 6, WINDOW_MS);
   if (!walletLimited.ok) {
     return NextResponse.json(
@@ -66,14 +66,10 @@ export async function GET(req: Request) {
     );
   }
 
-  const rpcUrl = process.env.HELIUS_RPC_URL || clusterApiUrl("mainnet-beta");
-
   try {
-    const connection = new Connection(rpcUrl, {
-      commitment: "confirmed",
-      disableRetryOnRateLimit: true,
-    });
-    const accounts = await findEmptyTokenAccounts(connection, owner);
+    const accounts = await withRpcFallback((connection) =>
+      findEmptyTokenAccounts(connection, owner)
+    );
     return NextResponse.json(
       { accounts },
       {

@@ -14,16 +14,13 @@ Next.js (App Router) · TypeScript · Tailwind CSS v3 · `@solana/web3.js` ·
 | --- | --- | --- |
 | `NEXT_PUBLIC_FEE_WALLET` | yes | Fee wallet public address |
 | `NEXT_PUBLIC_FEE_PERCENT` | no (default 10) | Fee % |
-| `HELIUS_RPC_URL` | strongly recommended | Private RPC URL+key (server-only) |
+| `HELIUS_RPC_URL` | optional fallback | Private RPC URL+key (server-only; used only if public fails) |
 
-**Helius is optional for demos.** Without it, the app falls back to Solana's
-public RPC (`api.mainnet-beta.solana.com`) — that is why your wallet scan
-worked with no env vars set. Public RPC is fine for light testing but will
-rate-limit or fail under real traffic. For production, set `HELIUS_RPC_URL`
-(server-only, never `NEXT_PUBLIC_*`).
+**RPC order:** public Solana RPC first → `HELIUS_RPC_URL` only if public fails.
 
-**Never put an API key in `NEXT_PUBLIC_*`.** Those values are shipped to every
-visitor's browser.
+**~230 claims/day:** usually fine on public RPC alone (~few thousand RPC
+calls/day vs ~100 req / 10s / IP official limit). Spikes and heavy ledger
+parsing can still 429 — keep Helius as optional fallback.
 
 ## Anti-spam
 

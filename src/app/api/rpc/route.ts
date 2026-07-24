@@ -5,7 +5,7 @@ import {
   rateLimit,
   rateLimitHeaders,
 } from "@/lib/rate-limit";
-import { clusterApiUrl } from "@solana/web3.js";
+import { fetchRpcWithFallback } from "@/lib/rpc";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,8 +40,8 @@ const WINDOW_MS = 60_000;
 
 /**
  * Server-side Solana RPC proxy.
- * HELIUS_RPC_URL stays server-only — never NEXT_PUBLIC_*.
- * Falls back to Solana's public RPC if unset (works, but rate-limits hard).
+ * Tries public RPC first, then HELIUS_RPC_URL if public fails / rate-limits.
+ * The Helius key never reaches the browser.
  */
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) {
@@ -90,17 +90,17 @@ export async function POST(req: Request) {
 
   const calls = Array.isArray(body) ? body : [body];
   for (const call of calls) {
-    const method =
+    const methodName =
       call && typeof call === "object" && "method" in call
         ? String((call as { method: string }).method)
         : "";
-    if (!ALLOWED_METHODS.has(method)) {
+    if (!ALLOWED_METHODS.has(methodName)) {
       return NextResponse.json(
         {
           jsonrpc: "2.0",
           error: {
             code: -32601,
-            message: `Method not allowed: ${method || "(missing)"}`,
+            message: `Method not allowed: ${methodName || "(missing)"}`,
           },
           id:
             call && typeof call === "object" && "id" in call
@@ -112,17 +112,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const upstream =
-    process.env.HELIUS_RPC_URL || clusterApiUrl("mainnet-beta");
-
   try {
-    const upstreamRes = await fetch(upstream, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
-
+    const upstreamRes = await fetchRpcWithFallback(body);
     const text = await upstreamRes.text();
     return new NextResponse(text, {
       status: upstreamRes.status,
