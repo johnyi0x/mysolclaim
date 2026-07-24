@@ -1,7 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
-import { FEE_WALLET_ADDRESS, SOLSCAN_ACCOUNT } from "@/lib/constants";
+import { FEE_WALLET_ADDRESS, SOLSCAN_ACCOUNT, X_URL } from "@/lib/constants";
 import { truncateAddress } from "@/lib/format";
+import { XLinkButton } from "./x-link";
 
 export function Footer() {
   return (
@@ -20,6 +21,7 @@ export function Footer() {
                 unoptimized
               />
               <p className="font-pixel text-[10px] sm:text-xs">mysolclaim</p>
+              <XLinkButton size="sm" className="ml-1" />
             </div>
             <p className="mt-3 text-base text-[var(--muted)] sm:text-lg">
               Non-custodial tool to reclaim SOL locked in empty token accounts.
@@ -34,7 +36,10 @@ export function Footer() {
               </p>
               <ul className="space-y-2 text-[var(--muted)]">
                 <li>
-                  <Link className="hover:text-[var(--accent)]" href="/#how-it-works">
+                  <Link
+                    className="hover:text-[var(--accent)]"
+                    href="/#how-it-works"
+                  >
                     How it works
                   </Link>
                 </li>
@@ -60,6 +65,16 @@ export function Footer() {
                 PROOF
               </p>
               <ul className="space-y-2 text-[var(--muted)]">
+                <li>
+                  <a
+                    href={X_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-[var(--accent)]"
+                  >
+                    X / @mysolclaim ↗
+                  </a>
+                </li>
                 <li>
                   {FEE_WALLET_ADDRESS ? (
                     <a

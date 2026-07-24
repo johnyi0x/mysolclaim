@@ -45,3 +45,6 @@ export const LEDGER_PARSE_LIMIT = 24;
 export const SOLSCAN_TX = (sig: string) => `https://solscan.io/tx/${sig}`;
 export const SOLSCAN_ACCOUNT = (addr: string) =>
   `https://solscan.io/account/${addr}`;
+
+/** Official X / Twitter account. */
+export const X_URL = "https://x.com/mysolclaim";

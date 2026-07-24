@@ -5,6 +5,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { ThemeToggle } from "./theme-toggle";
+import { XLinkButton } from "./x-link";
 
 const WalletMultiButton = dynamic(
   () =>
@@ -61,6 +62,7 @@ export function Header() {
             {menuOpen ? "X" : "≡"}
           </button>
           <ThemeToggle />
+          <XLinkButton />
           <div className="wallet-btn-wrap">
             <WalletMultiButton />
           </div>
@@ -75,7 +77,20 @@ export function Header() {
               { href: "/security", label: "Security" },
               { href: "/faq", label: "FAQ" },
               { href: "/terms", label: "Terms" },
-            ].map((item) => (
+              { href: "https://x.com/mysolclaim", label: "X / Twitter ↗", external: true },
+            ].map((item) =>
+              "external" in item && item.external ? (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-11 py-2 hover:text-[var(--accent)]"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {item.label}
+                </a>
+              ) : (
               <Link
                 key={item.href}
                 href={item.href}
@@ -84,7 +99,8 @@ export function Header() {
               >
                 {item.label}
               </Link>
-            ))}
+              )
+            )}
           </nav>
         </div>
       )}
