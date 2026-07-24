@@ -23,6 +23,8 @@ export interface ClaimBatch {
   /** Service fee (lamports) transferred to the fee wallet in the same tx. */
   feeLamports: number;
   action: ClaimActionType;
+  blockhash: string;
+  lastValidBlockHeight: number;
 }
 
 export function chunk<T>(items: T[], size: number): T[][] {
@@ -57,26 +59,33 @@ async function appendFeeTransfer(
 
   let feeLamports = computeFee(reclaimableLamports);
 
-  const rent0 = await connection.getMinimumBalanceForRentExemption(0);
-  const feeInfo = await connection.getAccountInfo(FEE_WALLET, "confirmed");
-
-  if (!feeInfo) {
-    // First ever tip creates the fee wallet — must meet rent-exempt floor.
-    feeLamports = Math.max(feeLamports, rent0);
-  } else if (
-    feeInfo.data.length === 0 &&
-    feeInfo.lamports > 0 &&
-    feeInfo.lamports < rent0
-  ) {
-    // Under-rented system account — top up to rent-exempt.
-    feeLamports = Math.max(feeLamports, rent0 - feeInfo.lamports);
+  // Fallback ~890880 if RPC method is unavailable (keeps claims working).
+  let rent0 = 890_880;
+  try {
+    rent0 = await connection.getMinimumBalanceForRentExemption(0);
+  } catch {
+    // ignore — use fallback
   }
 
-  // Never take more than this batch reclaims (user must still net something
-  // when reclaimable > rent0; if reclaimable < rent0 and wallet missing, skip).
+  // true = fee wallet already rent-exempt on-chain (normal 10% tip is fine)
+  let feeWalletReady = true;
+  try {
+    const feeInfo = await connection.getAccountInfo(FEE_WALLET, "confirmed");
+    if (!feeInfo) {
+      feeWalletReady = false;
+      feeLamports = Math.max(feeLamports, rent0);
+    } else if (feeInfo.lamports < rent0) {
+      feeWalletReady = false;
+      feeLamports = Math.max(feeLamports, rent0 - feeInfo.lamports);
+    }
+  } catch {
+    // Assume funded if we cannot read (user already sent SOL).
+    feeWalletReady = true;
+  }
+
   const safeFee = Math.min(feeLamports, reclaimableLamports);
 
-  if (!feeInfo && safeFee < rent0) {
+  if (!feeWalletReady && safeFee < rent0) {
     throw new Error(
       `Fee wallet is not initialized on-chain and this claim (${safeFee} lamports fee) is too small to create it (needs ≥ ${rent0}). Send ~0.001 SOL to your fee wallet once, then retry.`
     );
@@ -142,6 +151,8 @@ export async function buildPumpCashbackTransaction(
     rentLamports: opportunity.lamports,
     feeLamports,
     action: "pump_cashback",
+    blockhash,
+    lastValidBlockHeight,
   };
 }
 
@@ -214,6 +225,8 @@ export async function buildClaimTransactions(
       rentLamports,
       feeLamports,
       action: "vacant_account",
+      blockhash,
+      lastValidBlockHeight,
     });
   }
 

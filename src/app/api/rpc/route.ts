@@ -28,6 +28,7 @@ const ALLOWED_METHODS = new Set([
   "getAccountInfo",
   "getBalance",
   "getMultipleAccounts",
+  "getMinimumBalanceForRentExemption",
   "getBlockHeight",
   "getEpochInfo",
   "getHealth",

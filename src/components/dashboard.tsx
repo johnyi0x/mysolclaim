@@ -170,14 +170,19 @@ export function Dashboard() {
     });
 
     setProgress(`Confirming ${label}…`);
-    const { blockhash, lastValidBlockHeight } =
-      await connection.getLatestBlockhash("confirmed");
+    // Must confirm against the same blockhash the tx was built with.
     const confirmation = await connection.confirmTransaction(
-      { signature, blockhash, lastValidBlockHeight },
+      {
+        signature,
+        blockhash: batch.blockhash,
+        lastValidBlockHeight: batch.lastValidBlockHeight,
+      },
       "confirmed"
     );
     if (confirmation.value.err) {
-      throw new Error(`Transaction failed: ${signature}`);
+      throw new Error(
+        `Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)} (${signature})`
+      );
     }
 
     return {
@@ -230,21 +235,28 @@ export function Dashboard() {
       }
     } catch (err) {
       console.error(err);
-      const raw = err instanceof Error ? err.message : String(err);
+      const raw =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : JSON.stringify(err);
       const message =
-        /reject|User rejected|cancelled/i.test(raw)
+        /reject|User rejected|cancelled|denied/i.test(raw)
           ? "You declined the transaction in your wallet."
-          : /Simulation failed/i.test(raw)
-            ? raw.length > 280
-              ? `${raw.slice(0, 280)}…`
-              : raw
-            : /Fee wallet is not initialized/i.test(raw)
-              ? raw
-            : /InsufficientFundsForRent/i.test(raw)
-              ? "Fee wallet may need a one-time rent deposit (~0.001 SOL). Send a tiny amount of SOL to your fee wallet address once, redeploy if needed, then retry."
-            : /insufficient|0x1|InsufficientFunds/i.test(raw)
-              ? "Not enough SOL in your wallet to cover network fees. Keep a tiny bit of SOL unlocked, then retry."
-              : "Something went wrong. Any txs you already approved are listed below.";
+          : /Method not allowed|not allowed/i.test(raw)
+            ? `RPC blocked a required method. Redeploy may be needed. Details: ${raw}`
+            : /Simulation failed|Fee wallet is not initialized|InsufficientFundsForRent|insufficient|0x1|InsufficientFunds|Transaction failed/i.test(
+                  raw
+                )
+              ? raw.length > 360
+                ? `${raw.slice(0, 360)}…`
+                : raw
+              : raw.length > 0
+                ? raw.length > 360
+                  ? `${raw.slice(0, 360)}…`
+                  : raw
+                : "Something went wrong. Any txs you already approved are listed below.";
       setClaimError(message);
     }
 
