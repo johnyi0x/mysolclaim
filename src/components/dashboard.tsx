@@ -8,6 +8,7 @@ import {
   computeFee,
   type ClaimBatch,
 } from "@/lib/claim";
+import { confirmSignaturePolled } from "@/lib/confirm";
 import {
   CLOSES_PER_TX,
   FEE_PERCENT,
@@ -150,9 +151,11 @@ export function Dashboard() {
 
   const sendBatch = async (
     batch: ClaimBatch,
-    label: string
+    label: string,
+    step: number,
+    total: number
   ): Promise<BatchResult> => {
-    setProgress(`Simulating ${label}…`);
+    setProgress(`(${step}/${total}) Simulating ${label}…`);
     const sim = await connection.simulateTransaction(batch.transaction);
     if (sim.value.err) {
       const logs = (sim.value.logs ?? []).slice(-8).join(" | ");
@@ -163,27 +166,23 @@ export function Dashboard() {
       );
     }
 
-    setProgress(`Approve ${label} in your wallet…`);
+    setProgress(
+      `(${step}/${total}) Approve ${label} in your wallet…`
+    );
     const signature = await sendTransaction(batch.transaction, connection, {
-      skipPreflight: false,
+      skipPreflight: true, // already simulated above
       preflightCommitment: "confirmed",
+      maxRetries: 3,
     });
 
-    setProgress(`Confirming ${label}…`);
-    // Must confirm against the same blockhash the tx was built with.
-    const confirmation = await connection.confirmTransaction(
-      {
-        signature,
-        blockhash: batch.blockhash,
-        lastValidBlockHeight: batch.lastValidBlockHeight,
-      },
-      "confirmed"
+    setProgress(`(${step}/${total}) Confirming ${label} on-chain…`);
+    await confirmSignaturePolled(connection, signature);
+
+    setProgress(
+      total > step
+        ? `(${step}/${total}) Confirmed! Preparing next signature…`
+        : `(${step}/${total}) Confirmed! Finishing…`
     );
-    if (confirmation.value.err) {
-      throw new Error(
-        `Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)} (${signature})`
-      );
-    }
 
     return {
       signature,
@@ -207,31 +206,48 @@ export function Dashboard() {
 
       if (includePump && pumpCashback) {
         step++;
-        setProgress(`Building Pump.fun cashback (${step}/${total})…`);
+        setProgress(`(${step}/${total}) Building Pump.fun cashback…`);
         const batch = await buildPumpCashbackTransaction(
           connection,
           publicKey,
           pumpCashback
         );
-        completed.push(
-          await sendBatch(batch, `Pump cashback ${step}/${total}`)
+        const result = await sendBatch(
+          batch,
+          "Pump.fun cashback",
+          step,
+          total
         );
+        completed.push(result);
         setResults([...completed]);
       }
 
       for (let i = 0; i < selectedAccounts.length; i += CLOSES_PER_TX) {
         const slice = selectedAccounts.slice(i, i + CLOSES_PER_TX);
         step++;
-        setProgress(`Building vacant accounts (${step}/${total})…`);
+        setProgress(`(${step}/${total}) Building vacant-account claim…`);
         const [batch] = await buildClaimTransactions(
           connection,
           publicKey,
           slice
         );
-        completed.push(
-          await sendBatch(batch, `vacant accounts ${step}/${total}`)
+        const result = await sendBatch(
+          batch,
+          "vacant accounts",
+          step,
+          total
         );
+        completed.push(result);
         setResults([...completed]);
+      }
+
+      setProgress(null);
+      setPhase("done");
+      if (completed.length > 0) {
+        notifyClaimsUpdated();
+        lastScanAt.current = 0;
+        // Soft rescan so vacant/pump panels update — don't block success UI.
+        void scan();
       }
     } catch (err) {
       console.error(err);
@@ -246,26 +262,21 @@ export function Dashboard() {
           ? "You declined the transaction in your wallet."
           : /Method not allowed|not allowed/i.test(raw)
             ? `RPC blocked a required method. Redeploy may be needed. Details: ${raw}`
-            : /Simulation failed|Fee wallet is not initialized|InsufficientFundsForRent|insufficient|0x1|InsufficientFunds|Transaction failed/i.test(
-                  raw
-                )
+            : raw.length > 0
               ? raw.length > 360
                 ? `${raw.slice(0, 360)}…`
                 : raw
-              : raw.length > 0
-                ? raw.length > 360
-                  ? `${raw.slice(0, 360)}…`
-                  : raw
-                : "Something went wrong. Any txs you already approved are listed below.";
+              : "Something went wrong. Any txs you already approved are listed below.";
       setClaimError(message);
-    }
-
-    setPhase("done");
-    setProgress(null);
-    if (completed.length > 0) {
-      notifyClaimsUpdated();
-      lastScanAt.current = 0;
-      scan();
+      setProgress(null);
+      // Keep any successful prior batches visible as "done" with partial success.
+      setPhase("done");
+      if (completed.length > 0) {
+        setResults([...completed]);
+        notifyClaimsUpdated();
+        lastScanAt.current = 0;
+        void scan();
+      }
     }
   };
 
@@ -280,17 +291,21 @@ export function Dashboard() {
   return (
     <section className="mx-auto max-w-6xl px-3 pb-8 pt-8 sm:px-4 sm:pt-12">
       {phase === "done" && results.length > 0 && (
-        <div className="mb-6 pixel-panel border-[var(--accent)] p-4 sm:mb-8 sm:p-6">
+        <div
+          id="claim-success"
+          className="mb-6 pixel-panel border-[var(--accent)] p-4 sm:mb-8 sm:p-6"
+        >
           <h2 className="font-pixel text-[10px] leading-relaxed text-[var(--accent)] sm:text-xs">
-            [OK] SUCCESS
-            {totalClosed > 0 ? ` — ${totalClosed} CLOSED` : ""}
+            [OK] CLAIM COMPLETE
+            {totalClosed > 0 ? ` — ${totalClosed} ACCOUNTS` : ""}
           </h2>
           <p className="mt-3 text-lg text-[var(--muted)] sm:text-xl">
-            You received{" "}
+            You received about{" "}
             <strong className="text-[var(--accent)]">
-              ≈ {formatSol(totalReceived)} SOL
+              {formatSol(totalReceived)} SOL
             </strong>{" "}
-            (reclaimed − {FEE_PERCENT}% fee).
+            (reclaimed − {FEE_PERCENT}% fee)
+            {claimError ? " from the txs that succeeded." : "."}
           </p>
           <ul className="mt-3 space-y-2 text-base sm:text-lg">
             {results.map((r) => (

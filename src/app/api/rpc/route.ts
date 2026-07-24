@@ -36,7 +36,7 @@ const ALLOWED_METHODS = new Set([
   "getSlot",
 ]);
 
-const LIMIT = 60;
+const LIMIT = 120;
 const WINDOW_MS = 60_000;
 
 /**
