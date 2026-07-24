@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
 import {
   clientKey,
+  isAllowedOrigin,
   rateLimit,
   rateLimitHeaders,
 } from "@/lib/rate-limit";
@@ -33,7 +34,7 @@ const EMPTY: LedgerResponse = {
   stats: { totalClaims: 0, totalAccountsClosed: 0, totalReclaimedLamports: 0 },
 };
 
-const LIMIT = 20; // ledger polls per minute per client
+const LIMIT = 20;
 const WINDOW_MS = 60_000;
 
 /**
@@ -41,6 +42,10 @@ const WINDOW_MS = 60_000;
  * Rate-limited to stop spam polling from burning RPC credits.
  */
 export async function GET(req: Request) {
+  if (!isAllowedOrigin(req)) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403 });
+  }
+
   const key = clientKey(req, "claims");
   const limited = rateLimit(key, LIMIT, WINDOW_MS);
   if (!limited.ok) {

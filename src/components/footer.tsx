@@ -9,7 +9,7 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-3 py-8 sm:px-4 sm:py-10">
         <div className="flex flex-col gap-8 md:flex-row md:justify-between">
           <div className="max-w-sm">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <Image
                 src="/piggy.png"
                 alt=""

@@ -3,6 +3,7 @@ import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
 import { findEmptyTokenAccounts } from "@/lib/scan";
 import {
   clientKey,
+  isAllowedOrigin,
   rateLimit,
   rateLimitHeaders,
 } from "@/lib/rate-limit";
@@ -10,15 +11,18 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const LIMIT = 8; // scans per window
+const LIMIT = 8;
 const WINDOW_MS = 60_000;
 
 /**
  * Rate-limited empty-account scan.
- * Keeps heavy RPC off anonymous browser free-for-alls and protects
- * the server-side Helius key.
+ * Uses HELIUS_RPC_URL if set; otherwise Solana public RPC (rate-limited).
  */
 export async function GET(req: Request) {
+  if (!isAllowedOrigin(req)) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403 });
+  }
+
   const key = clientKey(req, "scan");
   const limited = rateLimit(key, LIMIT, WINDOW_MS);
   if (!limited.ok) {

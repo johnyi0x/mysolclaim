@@ -1,7 +1,5 @@
 /**
  * Best-effort in-memory sliding-window rate limiter for serverless.
- * Each Vercel isolate keeps its own map — still stops rapid spam loops
- * and casual abuse without needing Redis for v1.
  */
 
 type Bucket = { timestamps: number[] };
@@ -36,7 +34,6 @@ export function rateLimit(
   bucket.timestamps.push(now);
   buckets.set(key, bucket);
 
-  // Soft GC so the map doesn't grow forever on long-lived instances.
   if (buckets.size > 5_000) {
     for (const [k, b] of buckets) {
       b.timestamps = b.timestamps.filter((t) => now - t < windowMs);
@@ -51,7 +48,6 @@ export function rateLimit(
   };
 }
 
-/** Extract a stable client key from a Request (IP + UA fingerprint). */
 export function clientKey(req: Request, prefix: string): string {
   const fwd = req.headers.get("x-forwarded-for");
   const ip =
@@ -66,8 +62,43 @@ export function rateLimitHeaders(result: RateLimitResult, limit: number) {
   return {
     "X-RateLimit-Limit": String(limit),
     "X-RateLimit-Remaining": String(result.remaining),
-    ...(result.ok
-      ? {}
-      : { "Retry-After": String(result.retryAfterSec) }),
+    ...(result.ok ? {} : { "Retry-After": String(result.retryAfterSec) }),
   };
+}
+
+/**
+ * Soft origin check for browser traffic.
+ * Allows same-site requests and configured production hosts.
+ * Note: Origin can be spoofed by non-browser clients — combine with rate limits.
+ */
+export function isAllowedOrigin(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  const referer = req.headers.get("referer");
+
+  // Same-origin / server-to-server / curl without Origin — allow but rate-limit.
+  if (!origin && !referer) return true;
+
+  const allowedHosts = new Set([
+    "mysolclaim.com",
+    "www.mysolclaim.com",
+    "mysolclaim.vercel.app",
+    "localhost",
+    "127.0.0.1",
+  ]);
+
+  // Also allow any *.vercel.app preview for this project
+  const check = (value: string | null) => {
+    if (!value) return false;
+    try {
+      const url = new URL(value);
+      if (allowedHosts.has(url.hostname)) return true;
+      if (url.hostname.endsWith(".vercel.app") && url.hostname.includes("mysolclaim"))
+        return true;
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  return check(origin) || check(referer);
 }

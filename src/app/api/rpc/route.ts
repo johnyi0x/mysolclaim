@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   clientKey,
+  isAllowedOrigin,
   rateLimit,
   rateLimitHeaders,
 } from "@/lib/rate-limit";
@@ -34,14 +35,26 @@ const ALLOWED_METHODS = new Set([
   "getSlot",
 ]);
 
-const LIMIT = 60; // RPC calls per minute per client
+const LIMIT = 60;
 const WINDOW_MS = 60_000;
 
 /**
  * Server-side Solana RPC proxy.
- * The Helius API key stays in HELIUS_RPC_URL (never NEXT_PUBLIC_*).
+ * HELIUS_RPC_URL stays server-only — never NEXT_PUBLIC_*.
+ * Falls back to Solana's public RPC if unset (works, but rate-limits hard).
  */
 export async function POST(req: Request) {
+  if (!isAllowedOrigin(req)) {
+    return NextResponse.json(
+      {
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Origin not allowed" },
+        id: null,
+      },
+      { status: 403 }
+    );
+  }
+
   const key = clientKey(req, "rpc");
   const limited = rateLimit(key, LIMIT, WINDOW_MS);
   if (!limited.ok) {
@@ -132,7 +145,6 @@ export async function POST(req: Request) {
   }
 }
 
-/** Health check / accidental GETs */
 export async function GET() {
   return NextResponse.json(
     { ok: true, proxy: "mysolclaim-rpc", allowed: [...ALLOWED_METHODS] },

@@ -20,12 +20,15 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b-[3px] border-[var(--panel-border)] bg-[var(--panel)]/95 backdrop-blur-sm">
       <div className="mx-auto flex min-h-14 max-w-6xl items-center justify-between gap-2 px-3 py-2 sm:min-h-16 sm:gap-3 sm:px-4">
-        <Link href="/" className="flex min-w-0 shrink items-center gap-1.5 sm:gap-2">
+        <Link
+          href="/"
+          className="flex min-w-0 shrink items-center gap-3 sm:gap-3.5"
+        >
           <Image
             src="/piggy.png"
             alt="MySolClaim piggy bank"
-            width={32}
-            height={32}
+            width={36}
+            height={36}
             className="h-8 w-8 shrink-0 sm:h-9 sm:w-9"
             style={{ imageRendering: "pixelated" }}
             priority
