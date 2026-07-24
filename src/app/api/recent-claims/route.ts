@@ -62,10 +62,7 @@ export async function GET(req: Request) {
   }
 
   const feeWalletAddress = process.env.NEXT_PUBLIC_FEE_WALLET;
-  const rpcUrl =
-    process.env.HELIUS_RPC_URL ||
-    process.env.NEXT_PUBLIC_RPC_URL ||
-    clusterApiUrl("mainnet-beta");
+  const rpcUrl = process.env.HELIUS_RPC_URL || clusterApiUrl("mainnet-beta");
 
   if (!feeWalletAddress) {
     return NextResponse.json(EMPTY, {

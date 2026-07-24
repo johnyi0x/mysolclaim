@@ -6,17 +6,17 @@ import {
   WalletProvider,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { RPC_URL } from "@/lib/constants";
+import { getBrowserRpcEndpoint } from "@/lib/rpc-endpoint";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 export function WalletProviders({ children }: { children: React.ReactNode }) {
-  // Empty adapter list: every modern wallet (Phantom, Solflare, Backpack…)
-  // registers itself via the Wallet Standard and is auto-detected.
   const wallets = useMemo(() => [], []);
+  // Same-origin /api/rpc proxy — Helius key never reaches the browser.
+  const endpoint = useMemo(() => getBrowserRpcEndpoint(), []);
 
   return (
-    <ConnectionProvider endpoint={RPC_URL} config={{ commitment: "confirmed" }}>
+    <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed" }}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>

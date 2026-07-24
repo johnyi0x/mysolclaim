@@ -1,55 +1,53 @@
 # MySolClaim (mysolclaim.com)
 
-Non-custodial Solana tool to close **empty SPL token accounts** (classic Token
-Program + Token-2022) and reclaim rent deposits (~0.002 SOL per account).
-
-Pixel / arcade / terminal UI. Brand: **mysolclaim** + pixel piggy bank.
+Non-custodial Solana tool to close **empty SPL token accounts** and reclaim rent.
 
 ## Stack
 
 Next.js (App Router) · TypeScript · Tailwind CSS v3 · `@solana/web3.js` ·
-`@solana/spl-token` · `@solana/wallet-adapter` · `next-themes`
+`@solana/spl-token` · `@solana/wallet-adapter` · `next-themes` ·
+`@vercel/analytics`
 
-## Local development
+## Environment variables (Vercel)
 
-```bash
-npm install
-cp .env.example .env.local
-# fill in FEE_WALLET + Helius RPC URLs
-npm run dev
-```
-
-## Environment variables (required on Vercel)
-
-Set these in **Vercel → Project → Settings → Environment Variables**
-(Production + Preview):
-
-| Name | Example | Notes |
+| Name | Public? | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_FEE_WALLET` | your fee wallet public address | fresh wallet public key only |
-| `NEXT_PUBLIC_FEE_PERCENT` | `10` | optional, defaults to 10 |
-| `NEXT_PUBLIC_RPC_URL` | `https://mainnet.helius-rpc.com/?api-key=YOUR_KEY` | needed for signing txs in browser |
-| `HELIUS_RPC_URL` | same as above | used by `/api/scan` + `/api/recent-claims` (server-only) |
+| `NEXT_PUBLIC_FEE_WALLET` | yes (address only) | Fee wallet public address |
+| `NEXT_PUBLIC_FEE_PERCENT` | yes | Fee % (default 10) |
+| `HELIUS_RPC_URL` | **NO — server only** | `https://mainnet.helius-rpc.com/?api-key=YOUR_KEY` |
 
-Without these, the site deploys but scanning/ledger won't work properly.
+**Do not put your Helius key in any `NEXT_PUBLIC_*` variable.** Those are
+embedded in the browser bundle and visible to every visitor.
+
+The site uses a rate-limited `/api/rpc` proxy (method allow-list) so the
+browser never sees the key. Scanning uses `/api/scan` (also server-side).
+
+### If you already set `NEXT_PUBLIC_RPC_URL`
+
+1. Delete `NEXT_PUBLIC_RPC_URL` from Vercel env vars.
+2. Keep only `HELIUS_RPC_URL` with your Helius URL+key.
+3. Redeploy.
 
 ## Anti-spam
 
-- `/api/scan` — 8 req/min/IP + 6/min/wallet, 429 + Retry-After
-- `/api/recent-claims` — 20 req/min/IP, edge-cached 60s
+- `/api/scan` — 8/min/IP + 6/min/wallet
+- `/api/recent-claims` — 20/min/IP + edge cache
+- `/api/rpc` — 60/min/IP, allow-listed methods only
 - Client scan cooldown 8s; ledger poll gap 15s
-- Heavy empty-account RPC is server-side (protects Helius credits)
+
+## Brand assets
+
+| File | Use |
+| --- | --- |
+| `public/piggy.png` | Site header + favicon PNG |
+| `public/favicon.svg` | Browser favicon |
+| `public/piggy-x.png` | **X/Twitter profile picture** (1024×1024) |
+
+## Vercel Analytics
+
+Code includes `<Analytics />`. Also enable it once in the dashboard:
+**Project → Analytics → Enable**.
 
 ## Deploy
 
-GitHub → Vercel → set env vars → add custom domain `mysolclaim.com`.
-After fixing deps, push to `main` to redeploy.
-
-## Security model (short)
-
-- No backend ever sees keys or funds.
-- Token Program rejects closing non-zero balances on-chain.
-- Rent destination is always the user; fee is a separate transfer in the same tx.
-- Fee % is clamped; fee is capped at reclaimed rent.
-- Each claim batch is simulated before the wallet is prompted to sign.
-- Security headers (CSP, X-Frame-Options DENY, etc.) in `next.config.ts`.
+Push to GitHub → Vercel auto-deploys. Set env vars before expecting scans to work.

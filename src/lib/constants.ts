@@ -1,4 +1,4 @@
-import { PublicKey, clusterApiUrl } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 
 /** Public address of the fee wallet. Every claim tx sends the fee here. */
 export const FEE_WALLET_ADDRESS = process.env.NEXT_PUBLIC_FEE_WALLET ?? "";
@@ -20,10 +20,6 @@ export const FEE_PERCENT = (() => {
   if (!Number.isFinite(raw)) return 10;
   return Math.min(50, Math.max(0, Math.floor(raw)));
 })();
-
-/** Browser-side RPC endpoint (Helius key recommended). */
-export const RPC_URL =
-  process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl("mainnet-beta");
 
 /** Max CloseAccount instructions per transaction (size limit is ~1232 bytes). */
 export const CLOSES_PER_TX = 20;

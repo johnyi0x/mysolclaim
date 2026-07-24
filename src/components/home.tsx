@@ -20,11 +20,12 @@ export function Home() {
         <>
           <Hero />
           <HowItWorks />
+          <LatestClaims />
           <Explainer />
           <Trust />
         </>
       )}
-      <LatestClaims />
+      {publicKey && <LatestClaims />}
       <FaqSection />
     </>
   );

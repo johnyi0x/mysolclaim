@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Press_Start_2P, VT323 } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { Header } from "@/components/header";
@@ -34,7 +35,10 @@ export const metadata: Metadata = {
   ],
   metadataBase: new URL("https://mysolclaim.com"),
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }, { url: "/piggy.png" }],
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/piggy.png", type: "image/png" },
+    ],
     apple: "/piggy.png",
   },
   openGraph: {
@@ -44,6 +48,13 @@ export const metadata: Metadata = {
     url: "https://mysolclaim.com",
     siteName: "MySolClaim",
     images: [{ url: "/piggy.png" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "MySolClaim",
+    description:
+      "Close empty Solana token accounts and reclaim your locked rent.",
+    images: ["/piggy-x.png"],
   },
 };
 
@@ -60,6 +71,7 @@ export default function RootLayout({
           <main>{children}</main>
           <Footer />
         </Providers>
+        <Analytics />
       </body>
     </html>
   );
