@@ -1,0 +1,98 @@
+import Image from "next/image";
+import Link from "next/link";
+import { FEE_WALLET_ADDRESS, SOLSCAN_ACCOUNT } from "@/lib/constants";
+import { truncateAddress } from "@/lib/format";
+
+export function Footer() {
+  return (
+    <footer className="border-t-[3px] border-[var(--panel-border)] bg-[var(--panel)]">
+      <div className="mx-auto max-w-6xl px-4 py-10">
+        <div className="flex flex-col gap-8 md:flex-row md:justify-between">
+          <div className="max-w-sm">
+            <div className="flex items-center gap-2">
+              <Image
+                src="/piggy.png"
+                alt=""
+                width={28}
+                height={28}
+                className="h-7 w-7"
+                style={{ imageRendering: "pixelated" }}
+              />
+              <p className="font-pixel text-xs">mysolclaim</p>
+            </div>
+            <p className="mt-3 text-lg text-[var(--muted)]">
+              Non-custodial tool to reclaim SOL locked in empty token accounts.
+              Your keys never leave your wallet. You sign every transaction.
+            </p>
+          </div>
+
+          <div className="flex gap-16 text-lg">
+            <div>
+              <p className="mb-3 font-pixel text-[10px] text-[var(--accent)]">
+                SITE
+              </p>
+              <ul className="space-y-2 text-[var(--muted)]">
+                <li>
+                  <Link className="hover:text-[var(--accent)]" href="/#how-it-works">
+                    How it works
+                  </Link>
+                </li>
+                <li>
+                  <Link className="hover:text-[var(--accent)]" href="/security">
+                    Security
+                  </Link>
+                </li>
+                <li>
+                  <Link className="hover:text-[var(--accent)]" href="/faq">
+                    FAQ
+                  </Link>
+                </li>
+                <li>
+                  <Link className="hover:text-[var(--accent)]" href="/terms">
+                    Terms
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <p className="mb-3 font-pixel text-[10px] text-[var(--accent)]">
+                PROOF
+              </p>
+              <ul className="space-y-2 text-[var(--muted)]">
+                <li>
+                  {FEE_WALLET_ADDRESS ? (
+                    <a
+                      href={SOLSCAN_ACCOUNT(FEE_WALLET_ADDRESS)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-[var(--accent)]"
+                    >
+                      Fee wallet: {truncateAddress(FEE_WALLET_ADDRESS, 5)} ↗
+                    </a>
+                  ) : (
+                    <span>Fee wallet: not configured</span>
+                  )}
+                </li>
+                <li>
+                  <a
+                    href="https://solana.com/docs/tokens/basics/close-account"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-[var(--accent)]"
+                  >
+                    Solana docs ↗
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-10 text-base text-[var(--muted)]">
+          © {new Date().getFullYear()} MySolClaim · mysolclaim.com · provided
+          as-is. All actions require your explicit wallet signature.
+        </p>
+      </div>
+    </footer>
+  );
+}
