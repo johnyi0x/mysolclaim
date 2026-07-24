@@ -4,12 +4,6 @@ import {
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  NATIVE_MINT,
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
-} from "@solana/spl-token";
 
 /** Pump.fun bonding-curve program (cashback + volume accumulator). */
 export const PUMP_PROGRAM_ID = new PublicKey(
@@ -19,7 +13,14 @@ export const PUMP_PROGRAM_ID = new PublicKey(
 const USER_VOLUME_SEED = Buffer.from("user_volume_accumulator");
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
-/** Anchor discriminators from pump IDL. */
+/**
+ * Legacy `claim_cashback` — SOL only, no ATA creation.
+ * Prefer this over claim_cashback_v2: v2 can init WSOL ATAs and fail with
+ * InsufficientFundsForRent when the wallet has almost no liquid SOL.
+ */
+export const CLAIM_CASHBACK_DISC = Buffer.from([
+  37, 58, 35, 126, 190, 53, 228, 197,
+]);
 export const CLAIM_CASHBACK_V2_DISC = Buffer.from([
   122, 243, 204, 65, 94, 116, 29, 55,
 ]);
@@ -27,10 +28,13 @@ export const CLOSE_USER_VOLUME_DISC = Buffer.from([
   249, 69, 164, 218, 150, 103, 84, 138,
 ]);
 
+/** Ignore dust above rent — avoids unnecessary claim ixs. */
+const CASHBACK_DUST_LAMPORTS = 50_000; // 0.00005 SOL
+
 export interface PumpCashbackOpportunity {
   /** UserVolumeAccumulator PDA address. */
   accumulator: string;
-  /** Total lamports on the PDA (cashback above rent + rent, all reclaimable via claim+close). */
+  /** Total lamports on the PDA (all reclaimable via claim+close). */
   lamports: number;
   /** Lamports above rent-exempt minimum (unclaimed SOL cashback). */
   cashbackLamports: number;
@@ -57,9 +61,8 @@ export function getPumpEventAuthority(): PublicKey {
 /**
  * Detect reclaimable Pump.fun trader cashback + volume-PDA rent for a wallet.
  *
- * Mechanics (official pump-public-docs + claimfreesol-style reclaim):
- * 1) `claim_cashback_v2` moves lamports above rent from the accumulator → user
- * 2) `close_user_volume_accumulator` returns the rent-exempt deposit → user
+ * 1) optional `claim_cashback` (legacy) — excess lamports → user (no ATAs)
+ * 2) `close_user_volume_accumulator` — rent → user
  */
 export async function findPumpCashback(
   connection: Connection,
@@ -84,39 +87,21 @@ export async function findPumpCashback(
   };
 }
 
-function buildClaimCashbackV2Ix(user: PublicKey): TransactionInstruction {
+/** Legacy claim_cashback — accounts from pump IDL (includes system_program). */
+function buildClaimCashbackLegacyIx(user: PublicKey): TransactionInstruction {
   const accumulator = getUserVolumeAccumulatorPda(user);
   const eventAuthority = getPumpEventAuthority();
-  const associatedAccumulator = getAssociatedTokenAddressSync(
-    NATIVE_MINT,
-    accumulator,
-    true,
-    TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-  const associatedUser = getAssociatedTokenAddressSync(
-    NATIVE_MINT,
-    user,
-    false,
-    TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
 
   return new TransactionInstruction({
     programId: PUMP_PROGRAM_ID,
     keys: [
       { pubkey: user, isSigner: false, isWritable: true },
       { pubkey: accumulator, isSigner: false, isWritable: true },
-      { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: associatedAccumulator, isSigner: false, isWritable: true },
-      { pubkey: associatedUser, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: eventAuthority, isSigner: false, isWritable: false },
       { pubkey: PUMP_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
-    data: CLAIM_CASHBACK_V2_DISC,
+    data: CLAIM_CASHBACK_DISC,
   });
 }
 
@@ -136,28 +121,34 @@ function buildCloseUserVolumeIx(user: PublicKey): TransactionInstruction {
   });
 }
 
-/** claim_cashback_v2 (only if there is excess cashback) then close_user_volume_accumulator. */
+/**
+ * Build reclaim instructions.
+ * - Never uses claim_cashback_v2 (can create WSOL ATAs → InsufficientFundsForRent).
+ * - Claims excess SOL via legacy claim_cashback only when meaningful.
+ * - Always closes the volume accumulator to return rent.
+ */
 export function buildPumpCashbackInstructions(
   user: PublicKey,
-  options?: { includeClaim?: boolean }
+  options?: { cashbackLamports?: number }
 ): TransactionInstruction[] {
-  const includeClaim = options?.includeClaim ?? true;
+  const cashback = options?.cashbackLamports ?? 0;
   const ixs: TransactionInstruction[] = [];
-  if (includeClaim) {
-    ixs.push(buildClaimCashbackV2Ix(user));
+  if (cashback >= CASHBACK_DUST_LAMPORTS) {
+    ixs.push(buildClaimCashbackLegacyIx(user));
   }
   ixs.push(buildCloseUserVolumeIx(user));
   return ixs;
 }
 
 /** True if instruction data starts with a known Pump cashback/close discriminator. */
-export function isPumpCashbackInstructionData(data: Buffer | Uint8Array): boolean {
+export function isPumpCashbackInstructionData(
+  data: Buffer | Uint8Array
+): boolean {
   if (data.length < 8) return false;
   const head = Buffer.from(data.slice(0, 8));
   return (
     head.equals(CLAIM_CASHBACK_V2_DISC) ||
     head.equals(CLOSE_USER_VOLUME_DISC) ||
-    // legacy claim_cashback
-    head.equals(Buffer.from([37, 58, 35, 126, 190, 53, 228, 197]))
+    head.equals(CLAIM_CASHBACK_DISC)
   );
 }

@@ -80,13 +80,13 @@ export async function buildPumpCashbackTransaction(
   });
 
   tx.add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
-    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 })
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
+    // Keep priority fee modest — reclaim wallets often have little liquid SOL.
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
   );
 
   for (const ix of buildPumpCashbackInstructions(user, {
-    // Skip claim when there's nothing above rent — close alone is enough.
-    includeClaim: opportunity.cashbackLamports > 0,
+    cashbackLamports: opportunity.cashbackLamports,
   })) {
     tx.add(ix);
   }

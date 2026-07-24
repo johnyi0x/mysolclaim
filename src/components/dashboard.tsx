@@ -238,6 +238,8 @@ export function Dashboard() {
             ? raw.length > 280
               ? `${raw.slice(0, 280)}…`
               : raw
+            : /InsufficientFundsForRent/i.test(raw)
+              ? "Pump reclaim needs a tiny bit of unlocked SOL for network fees (not for the claim itself). Leave ~0.01 SOL free, then retry — or uncheck Pump.fun Cashback and claim vacant accounts first."
             : /insufficient|0x1|InsufficientFunds/i.test(raw)
               ? "Not enough SOL in your wallet to cover network fees. Keep a tiny bit of SOL unlocked, then retry."
               : "Something went wrong. Any txs you already approved are listed below.";
