@@ -7,17 +7,17 @@ const STEPS = [
   {
     n: "02",
     title: "SCAN",
-    text: "We scan the blockchain for token accounts you own with a balance of exactly zero. Free, instant, and nothing is signed.",
+    text: "We find empty token accounts plus any Pump.fun cashback / volume rent you can reclaim. Free, read-only, nothing is signed.",
   },
   {
     n: "03",
     title: "REVIEW",
-    text: "See every empty account and the rent locked in it. Select all or pick individually — exact SOL shown before anything happens.",
+    text: "See vacant accounts and Pump.fun cashback separately. Select what to claim — exact SOL and fee shown before anything happens.",
   },
   {
     n: "04",
     title: "CLAIM",
-    text: "Your wallet simulates the transaction and shows the net SOL you gain. Approve it, and the rent lands directly in your wallet.",
+    text: "Your wallet simulates each transaction and shows the net SOL you gain. Approve, and SOL lands directly in your wallet.",
   },
 ];
 

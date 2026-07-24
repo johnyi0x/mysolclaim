@@ -33,9 +33,9 @@ parsing can still 429 — keep Helius as optional fallback.
 
 | File | Use |
 | --- | --- |
-| `public/piggy.png` | Site header + favicon PNG |
-| `public/favicon.svg` | Browser favicon |
-| `public/piggy-x.png` | **X/Twitter profile picture** (1024×1024) |
+| `public/piggy.png` | Site header logo (transparent background) |
+| `public/favicon.png` / `favicon.ico` | Browser favicon (from logo) |
+| `public/piggy-x.png` | **X/Twitter profile picture** (navy background) |
 
 ## Vercel Analytics
 

@@ -1,0 +1,9 @@
+size=1024x1024
+transparent_pixels=613893
+corner_TL=(6, 7, 20, 0)
+corner_TR=(6, 6, 19, 0)
+corner_BL=(6, 8, 17, 0)
+corner_BR=(5, 8, 20, 0)
+saved=C:\Users\oldca\Downloads\sol-reclaim\public\piggy.png
+favicon_png=C:\Users\oldca\Downloads\sol-reclaim\public\favicon.png
+favicon_ico=C:\Users\oldca\Downloads\sol-reclaim\public\favicon.ico

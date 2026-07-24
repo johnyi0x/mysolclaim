@@ -7,6 +7,7 @@ import { FaqSection } from "./faq";
 import { Hero } from "./hero";
 import { HowItWorks } from "./how-it-works";
 import { LatestClaims } from "./latest-claims";
+import { ClaimStats } from "./claim-stats";
 import { Trust } from "./trust";
 
 export function Home() {
@@ -21,11 +22,17 @@ export function Home() {
           <Hero />
           <HowItWorks />
           <LatestClaims />
+          <ClaimStats />
           <Explainer />
           <Trust />
         </>
       )}
-      {publicKey && <LatestClaims />}
+      {publicKey && (
+        <>
+          <LatestClaims />
+          <ClaimStats />
+        </>
+      )}
       <FaqSection />
     </>
   );

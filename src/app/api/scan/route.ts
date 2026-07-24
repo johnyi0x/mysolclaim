@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { findEmptyTokenAccounts } from "@/lib/scan";
+import { findPumpCashback } from "@/lib/pump-cashback";
 import {
   clientKey,
   isAllowedOrigin,
@@ -16,7 +17,7 @@ const LIMIT = 8;
 const WINDOW_MS = 60_000;
 
 /**
- * Rate-limited empty-account scan.
+ * Rate-limited empty-account + Pump.fun cashback scan.
  * Tries public Solana RPC first, then HELIUS_RPC_URL if configured.
  */
 export async function GET(req: Request) {
@@ -67,11 +68,15 @@ export async function GET(req: Request) {
   }
 
   try {
-    const accounts = await withRpcFallback((connection) =>
-      findEmptyTokenAccounts(connection, owner)
-    );
+    const { accounts, pumpCashback } = await withRpcFallback(async (connection) => {
+      const [accounts, pumpCashback] = await Promise.all([
+        findEmptyTokenAccounts(connection, owner),
+        findPumpCashback(connection, owner),
+      ]);
+      return { accounts, pumpCashback };
+    });
     return NextResponse.json(
-      { accounts },
+      { accounts, pumpCashback },
       {
         headers: {
           ...rateLimitHeaders(limited, LIMIT),

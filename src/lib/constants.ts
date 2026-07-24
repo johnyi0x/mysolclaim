@@ -27,6 +27,15 @@ export const CLOSES_PER_TX = 20;
 /** Rent-exempt deposit of a standard token account, for display estimates. */
 export const RENT_PER_ACCOUNT_SOL = 0.00203928;
 
+/** Max rows returned by /api/recent-claims for the live feed. */
+export const LEDGER_DISPLAY_LIMIT = 15;
+
+/** Client-side mobile feed cap (desktop shows full LEDGER_DISPLAY_LIMIT). */
+export const LEDGER_MOBILE_LIMIT = 8;
+
+/** Max fee-wallet signatures scanned when building all-time stats. */
+export const LEDGER_HISTORY_CAP = 500;
+
 export const SOLSCAN_TX = (sig: string) => `https://solscan.io/tx/${sig}`;
 export const SOLSCAN_ACCOUNT = (addr: string) =>
   `https://solscan.io/account/${addr}`;

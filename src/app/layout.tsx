@@ -36,7 +36,8 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://mysolclaim.com"),
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.png", type: "image/png", sizes: "48x48" },
       { url: "/piggy.png", type: "image/png" },
     ],
     apple: "/piggy.png",

@@ -29,9 +29,10 @@ export function Header() {
             alt="MySolClaim piggy bank"
             width={36}
             height={36}
-            className="h-8 w-8 shrink-0 sm:h-9 sm:w-9"
+            className="h-8 w-8 shrink-0 bg-transparent sm:h-9 sm:w-9"
             style={{ imageRendering: "pixelated" }}
             priority
+            unoptimized
           />
           <span className="font-pixel truncate text-[9px] leading-none sm:text-[11px] md:text-xs">
             mysolclaim

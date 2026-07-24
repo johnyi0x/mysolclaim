@@ -15,8 +15,9 @@ export function Footer() {
                 alt=""
                 width={28}
                 height={28}
-                className="h-7 w-7"
+                className="h-7 w-7 bg-transparent"
                 style={{ imageRendering: "pixelated" }}
+                unoptimized
               />
               <p className="font-pixel text-[10px] sm:text-xs">mysolclaim</p>
             </div>

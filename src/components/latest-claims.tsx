@@ -1,12 +1,33 @@
 "use client";
 
-import { SOLSCAN_TX } from "@/lib/constants";
+import type { ClaimActionType } from "@/app/api/recent-claims/route";
+import {
+  LEDGER_DISPLAY_LIMIT,
+  LEDGER_MOBILE_LIMIT,
+  SOLSCAN_TX,
+} from "@/lib/constants";
 import { formatSol, timeAgo, truncateAddress } from "@/lib/format";
 import { useLedger } from "@/lib/use-ledger";
 
+function actionLabel(action: ClaimActionType): string {
+  switch (action) {
+    case "pump_cashback":
+      return "Pump.fun Cashback";
+    case "burn_token":
+      return "Burn Token";
+    case "mixed":
+      return "Mixed";
+    case "vacant_account":
+    default:
+      return "Vacant Account";
+  }
+}
+
 export function LatestClaims() {
   const { data, loading } = useLedger();
-  const claims = data?.claims ?? [];
+  const all = data?.claims ?? [];
+  const desktop = all.slice(0, LEDGER_DISPLAY_LIMIT);
+  const mobile = all.slice(0, LEDGER_MOBILE_LIMIT);
 
   return (
     <section
@@ -27,23 +48,28 @@ export function LatestClaims() {
             Loading on-chain data…
           </div>
         )}
-        {!loading && claims.length === 0 && (
+        {!loading && mobile.length === 0 && (
           <div className="pixel-panel p-4 text-center text-[var(--muted)]">
             No claims yet — be the first!
           </div>
         )}
-        {claims.map((claim) => (
+        {mobile.map((claim) => (
           <div key={claim.signature} className="pixel-panel p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-pixel text-[10px] text-[var(--accent)]">
                   +{formatSol(claim.reclaimedLamports)} SOL
                 </p>
+                <p className="mt-1 text-sm uppercase text-[var(--muted)]">
+                  {actionLabel(claim.action)}
+                </p>
                 <p className="mt-1 font-mono text-sm text-[var(--muted)]">
                   {truncateAddress(claim.wallet)}
                 </p>
                 <p className="text-sm text-[var(--muted)]">
-                  {claim.accountsClosed} closed ·{" "}
+                  {claim.accountsClosed > 0
+                    ? `${claim.accountsClosed} closed · `
+                    : ""}
                   {claim.blockTime ? timeAgo(claim.blockTime) : "—"}
                 </p>
               </div>
@@ -66,8 +92,8 @@ export function LatestClaims() {
           <thead>
             <tr className="border-b-[3px] border-[var(--panel-border)] text-left font-pixel text-[9px] uppercase text-[var(--muted)]">
               <th className="px-4 py-3">When</th>
-              <th className="px-4 py-3">Wallet</th>
-              <th className="px-4 py-3">Closed</th>
+              <th className="px-4 py-3">User</th>
+              <th className="px-4 py-3">Action</th>
               <th className="px-4 py-3">SOL</th>
               <th className="px-4 py-3 text-right">Proof</th>
             </tr>
@@ -83,7 +109,7 @@ export function LatestClaims() {
                 </td>
               </tr>
             )}
-            {!loading && claims.length === 0 && (
+            {!loading && desktop.length === 0 && (
               <tr>
                 <td
                   colSpan={5}
@@ -93,7 +119,7 @@ export function LatestClaims() {
                 </td>
               </tr>
             )}
-            {claims.map((claim) => (
+            {desktop.map((claim) => (
               <tr key={claim.signature}>
                 <td className="px-4 py-3 text-[var(--muted)]">
                   {claim.blockTime ? timeAgo(claim.blockTime) : "—"}
@@ -101,7 +127,9 @@ export function LatestClaims() {
                 <td className="px-4 py-3 font-mono text-base">
                   {truncateAddress(claim.wallet)}
                 </td>
-                <td className="px-4 py-3">{claim.accountsClosed}</td>
+                <td className="px-4 py-3 text-base">
+                  {actionLabel(claim.action)}
+                </td>
                 <td className="px-4 py-3 font-semibold text-[var(--accent)]">
                   +{formatSol(claim.reclaimedLamports)}
                 </td>
