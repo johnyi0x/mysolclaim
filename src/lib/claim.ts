@@ -36,14 +36,53 @@ export function computeFee(rentLamports: number): number {
   return Math.floor((rentLamports * FEE_PERCENT) / 100);
 }
 
-function appendFeeTransfer(
+/**
+ * Append service-fee transfer.
+ *
+ * Critical: if the fee wallet account does not exist yet (or is below
+ * rent-exempt), SystemProgram.transfer *creates/funds* it. The transfer
+ * amount MUST be >= rent-exempt minimum or Solana returns
+ * InsufficientFundsForRent on the fee-wallet account index — which is the
+ * failure users were seeing on both Pump and vacant claims.
+ */
+async function appendFeeTransfer(
+  connection: Connection,
   tx: Transaction,
   user: PublicKey,
   reclaimableLamports: number
-): number {
-  const feeLamports = FEE_WALLET ? computeFee(reclaimableLamports) : 0;
+): Promise<number> {
+  if (!FEE_WALLET || FEE_PERCENT <= 0 || reclaimableLamports <= 0) {
+    return 0;
+  }
+
+  let feeLamports = computeFee(reclaimableLamports);
+
+  const rent0 = await connection.getMinimumBalanceForRentExemption(0);
+  const feeInfo = await connection.getAccountInfo(FEE_WALLET, "confirmed");
+
+  if (!feeInfo) {
+    // First ever tip creates the fee wallet — must meet rent-exempt floor.
+    feeLamports = Math.max(feeLamports, rent0);
+  } else if (
+    feeInfo.data.length === 0 &&
+    feeInfo.lamports > 0 &&
+    feeInfo.lamports < rent0
+  ) {
+    // Under-rented system account — top up to rent-exempt.
+    feeLamports = Math.max(feeLamports, rent0 - feeInfo.lamports);
+  }
+
+  // Never take more than this batch reclaims (user must still net something
+  // when reclaimable > rent0; if reclaimable < rent0 and wallet missing, skip).
   const safeFee = Math.min(feeLamports, reclaimableLamports);
-  if (FEE_WALLET && safeFee > 0) {
+
+  if (!feeInfo && safeFee < rent0) {
+    throw new Error(
+      `Fee wallet is not initialized on-chain and this claim (${safeFee} lamports fee) is too small to create it (needs ≥ ${rent0}). Send ~0.001 SOL to your fee wallet once, then retry.`
+    );
+  }
+
+  if (safeFee > 0) {
     tx.add(
       SystemProgram.transfer({
         fromPubkey: user,
@@ -52,12 +91,12 @@ function appendFeeTransfer(
       })
     );
   }
+
   return safeFee;
 }
 
 /**
  * Build Pump.fun cashback claim + close volume accumulator + service fee.
- * Same pattern as claimfreesol / the CLosey tip txs on Solscan.
  */
 export async function buildPumpCashbackTransaction(
   connection: Connection,
@@ -81,7 +120,6 @@ export async function buildPumpCashbackTransaction(
 
   tx.add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
-    // Keep priority fee modest — reclaim wallets often have little liquid SOL.
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
   );
 
@@ -91,7 +129,12 @@ export async function buildPumpCashbackTransaction(
     tx.add(ix);
   }
 
-  const feeLamports = appendFeeTransfer(tx, user, opportunity.lamports);
+  const feeLamports = await appendFeeTransfer(
+    connection,
+    tx,
+    user,
+    opportunity.lamports
+  );
 
   return {
     transaction: tx,
@@ -108,9 +151,7 @@ export async function buildPumpCashbackTransaction(
  * Security invariants:
  * - Rent destination is ALWAYS the connected user (never the fee wallet).
  * - Fee is a separate SystemProgram.transfer in the SAME atomic tx.
- * - Only accounts already filtered as amount===0 + closable are included;
- *   the Token Program still rejects non-zero balances on-chain.
- * - Each batch gets a fresh blockhash so slow multi-sig flows don't expire.
+ * - Only accounts already filtered as amount===0 + closable are included.
  */
 export async function buildClaimTransactions(
   connection: Connection,
@@ -137,9 +178,10 @@ export async function buildClaimTransactions(
       lastValidBlockHeight,
     });
 
+    // Token-2022 closes with extensions need more CU than classic SPL.
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({
-        units: 6_000 * accounts.length + 10_000,
+        units: Math.max(50_000, 25_000 * accounts.length + 20_000),
       }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
     );
@@ -159,7 +201,12 @@ export async function buildClaimTransactions(
       );
     }
 
-    const feeLamports = appendFeeTransfer(tx, user, rentLamports);
+    const feeLamports = await appendFeeTransfer(
+      connection,
+      tx,
+      user,
+      rentLamports
+    );
 
     results.push({
       transaction: tx,
