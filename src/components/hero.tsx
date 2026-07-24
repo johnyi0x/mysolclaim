@@ -57,8 +57,8 @@ export function Hero() {
                 accent: true,
               },
               {
-                value: String(stats.totalAccountsClosed),
-                label: "accts*",
+                value: String(stats.totalUsers),
+                label: "users*",
               },
               { value: String(stats.totalClaims), label: "claims*" },
             ].map((s) => (
