@@ -23,14 +23,14 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-16">
-      <h2 className="text-center font-pixel text-sm sm:text-base">
+    <section id="how-it-works" className="mx-auto max-w-6xl scroll-mt-20 px-3 py-12 sm:px-4 sm:py-16">
+      <h2 className="text-center font-pixel text-[11px] sm:text-sm sm:text-base">
         &gt; how_it_works
       </h2>
-      <p className="mx-auto mt-3 max-w-xl text-center text-xl text-[var(--muted)]">
+      <p className="mx-auto mt-3 max-w-xl px-2 text-center text-lg text-[var(--muted)] sm:text-xl">
         Four steps. Nothing moves without your signature.
       </p>
-      <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-8 grid gap-4 sm:mt-10 sm:gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {STEPS.map((step) => (
           <div key={step.n} className="pixel-panel p-5">
             <span className="font-pixel text-[10px] text-[var(--accent)]">

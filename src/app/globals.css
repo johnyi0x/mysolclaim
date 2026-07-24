@@ -1,5 +1,6 @@
-@import "tailwindcss";
-@custom-variant dark (&:is(.dark *));
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --background: #e8e4d4;
@@ -36,6 +37,11 @@ body {
   font-size: 1.15rem;
   line-height: 1.35;
   image-rendering: pixelated;
+  overflow-x: hidden;
+  /* iOS safe areas */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* CRT / terminal atmosphere */
@@ -93,14 +99,26 @@ footer {
   box-shadow: 4px 4px 0 var(--panel-border);
 }
 
+@media (max-width: 640px) {
+  .pixel-panel {
+    box-shadow: 3px 3px 0 var(--panel-border);
+  }
+}
+
 .pixel-btn {
   font-family: var(--font-press-start), monospace;
-  font-size: 0.65rem;
+  font-size: 0.55rem;
   border: 3px solid var(--panel-border);
   background: var(--accent);
   color: #04140c;
   box-shadow: 3px 3px 0 var(--panel-border);
   transition: transform 0.05s ease, box-shadow 0.05s ease;
+}
+
+@media (min-width: 640px) {
+  .pixel-btn {
+    font-size: 0.65rem;
+  }
 }
 
 .pixel-btn:hover:not(:disabled) {
@@ -128,18 +146,46 @@ footer {
 }
 
 /* Wallet adapter — arcade style */
+.wallet-btn-wrap .wallet-adapter-button,
 .wallet-adapter-button {
   font-family: var(--font-press-start), monospace !important;
-  font-size: 0.62rem !important;
+  font-size: 0.5rem !important;
   font-weight: 400 !important;
   border-radius: 0 !important;
-  height: 2.6rem !important;
-  line-height: 1.2 !important;
-  padding: 0 0.9rem !important;
+  height: 2.5rem !important;
+  min-height: 2.5rem !important;
+  line-height: 1.15 !important;
+  padding: 0 0.55rem !important;
   background: var(--accent) !important;
   color: #04140c !important;
   border: 3px solid var(--panel-border) !important;
   box-shadow: 3px 3px 0 var(--panel-border) !important;
+  max-width: 100% !important;
+  white-space: nowrap !important;
+}
+
+@media (min-width: 640px) {
+  .wallet-btn-wrap .wallet-adapter-button,
+  .wallet-adapter-button {
+    font-size: 0.62rem !important;
+    height: 2.6rem !important;
+    padding: 0 0.9rem !important;
+  }
+}
+
+.wallet-btn-wrap {
+  max-width: 100%;
+}
+
+.wallet-btn-wrap .wallet-adapter-button {
+  width: 100%;
+  justify-content: center !important;
+}
+
+@media (min-width: 640px) {
+  .wallet-btn-wrap .wallet-adapter-button {
+    width: auto;
+  }
 }
 
 .wallet-adapter-button:hover {
@@ -155,4 +201,13 @@ footer {
   border-radius: 0 !important;
   border: 3px solid #2a4a38 !important;
   font-family: var(--font-vt323), monospace !important;
+  max-width: calc(100vw - 1.5rem) !important;
+}
+
+.wallet-adapter-modal-list {
+  margin: 0 !important;
+}
+
+.wallet-adapter-modal-button-close {
+  background: transparent !important;
 }

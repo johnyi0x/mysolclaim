@@ -6,7 +6,7 @@ import { truncateAddress } from "@/lib/format";
 export function Footer() {
   return (
     <footer className="border-t-[3px] border-[var(--panel-border)] bg-[var(--panel)]">
-      <div className="mx-auto max-w-6xl px-4 py-10">
+      <div className="mx-auto max-w-6xl px-3 py-8 sm:px-4 sm:py-10">
         <div className="flex flex-col gap-8 md:flex-row md:justify-between">
           <div className="max-w-sm">
             <div className="flex items-center gap-2">
@@ -18,15 +18,15 @@ export function Footer() {
                 className="h-7 w-7"
                 style={{ imageRendering: "pixelated" }}
               />
-              <p className="font-pixel text-xs">mysolclaim</p>
+              <p className="font-pixel text-[10px] sm:text-xs">mysolclaim</p>
             </div>
-            <p className="mt-3 text-lg text-[var(--muted)]">
+            <p className="mt-3 text-base text-[var(--muted)] sm:text-lg">
               Non-custodial tool to reclaim SOL locked in empty token accounts.
               Your keys never leave your wallet. You sign every transaction.
             </p>
           </div>
 
-          <div className="flex gap-16 text-lg">
+          <div className="grid grid-cols-2 gap-8 text-base sm:text-lg md:flex md:gap-16">
             <div>
               <p className="mb-3 font-pixel text-[10px] text-[var(--accent)]">
                 SITE

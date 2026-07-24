@@ -7,7 +7,7 @@ Pixel / arcade / terminal UI. Brand: **mysolclaim** + pixel piggy bank.
 
 ## Stack
 
-Next.js (App Router) · TypeScript · Tailwind CSS v4 · `@solana/web3.js` ·
+Next.js (App Router) · TypeScript · Tailwind CSS v3 · `@solana/web3.js` ·
 `@solana/spl-token` · `@solana/wallet-adapter` · `next-themes`
 
 ## Local development
@@ -19,31 +19,31 @@ cp .env.example .env.local
 npm run dev
 ```
 
-## Environment variables
+## Environment variables (required on Vercel)
 
-| Variable | Where | Purpose |
+Set these in **Vercel → Project → Settings → Environment Variables**
+(Production + Preview):
+
+| Name | Example | Notes |
 | --- | --- | --- |
-| `NEXT_PUBLIC_FEE_WALLET` | browser + server | Public fee wallet address |
-| `NEXT_PUBLIC_FEE_PERCENT` | browser | Fee % of reclaimed rent (default 10, clamped 0–50) |
-| `NEXT_PUBLIC_RPC_URL` | browser | `https://mainnet.helius-rpc.com/?api-key=YOUR_KEY` |
-| `HELIUS_RPC_URL` | server only | Same URL for `/api/recent-claims` |
+| `NEXT_PUBLIC_FEE_WALLET` | your fee wallet public address | fresh wallet public key only |
+| `NEXT_PUBLIC_FEE_PERCENT` | `10` | optional, defaults to 10 |
+| `NEXT_PUBLIC_RPC_URL` | `https://mainnet.helius-rpc.com/?api-key=YOUR_KEY` | needed for signing txs in browser |
+| `HELIUS_RPC_URL` | same as above | used by `/api/scan` + `/api/recent-claims` (server-only) |
 
-### Helius URL (important)
+Without these, the site deploys but scanning/ledger won't work properly.
 
-Helius does **not** show a ready-made URL. Your API key **is** the secret.
-Build the URL yourself:
+## Anti-spam
 
-```
-https://mainnet.helius-rpc.com/?api-key=PASTE_YOUR_KEY_HERE
-```
-
-Click the eye icon next to your key (e.g. `reclaimer`) → copy → paste after
-`api-key=`. Domain allowlists are not always available on Free; rotate the key
-if it gets abused, and keep `HELIUS_RPC_URL` server-only for the ledger route.
+- `/api/scan` — 8 req/min/IP + 6/min/wallet, 429 + Retry-After
+- `/api/recent-claims` — 20 req/min/IP, edge-cached 60s
+- Client scan cooldown 8s; ledger poll gap 15s
+- Heavy empty-account RPC is server-side (protects Helius credits)
 
 ## Deploy
 
 GitHub → Vercel → set env vars → add custom domain `mysolclaim.com`.
+After fixing deps, push to `main` to redeploy.
 
 ## Security model (short)
 

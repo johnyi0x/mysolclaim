@@ -9,15 +9,59 @@ export function LatestClaims() {
   const claims = data?.claims ?? [];
 
   return (
-    <section id="latest-claims" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-16">
-      <h2 className="text-center font-pixel text-sm sm:text-base">
+    <section
+      id="latest-claims"
+      className="mx-auto max-w-6xl scroll-mt-20 px-3 py-12 sm:px-4 sm:py-16"
+    >
+      <h2 className="text-center font-pixel text-[11px] sm:text-sm sm:text-base">
         &gt; latest_claims
       </h2>
-      <p className="mx-auto mt-3 max-w-xl text-center text-xl text-[var(--muted)]">
+      <p className="mx-auto mt-3 max-w-xl px-2 text-center text-lg text-[var(--muted)] sm:text-xl">
         Live from the blockchain — every row links to Solscan.
       </p>
 
-      <div className="mt-10 overflow-x-auto pixel-panel">
+      {/* Mobile cards */}
+      <div className="mt-8 space-y-3 md:hidden">
+        {loading && (
+          <div className="pixel-panel p-4 text-center text-[var(--muted)]">
+            Loading on-chain data…
+          </div>
+        )}
+        {!loading && claims.length === 0 && (
+          <div className="pixel-panel p-4 text-center text-[var(--muted)]">
+            No claims yet — be the first!
+          </div>
+        )}
+        {claims.map((claim) => (
+          <div key={claim.signature} className="pixel-panel p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-pixel text-[10px] text-[var(--accent)]">
+                  +{formatSol(claim.reclaimedLamports)} SOL
+                </p>
+                <p className="mt-1 font-mono text-sm text-[var(--muted)]">
+                  {truncateAddress(claim.wallet)}
+                </p>
+                <p className="text-sm text-[var(--muted)]">
+                  {claim.accountsClosed} closed ·{" "}
+                  {claim.blockTime ? timeAgo(claim.blockTime) : "—"}
+                </p>
+              </div>
+              <a
+                href={SOLSCAN_TX(claim.signature)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 text-[var(--accent-2)] underline"
+              >
+                Solscan ↗
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="mt-10 hidden overflow-x-auto pixel-panel md:block">
         <table className="w-full text-lg">
           <thead>
             <tr className="border-b-[3px] border-[var(--panel-border)] text-left font-pixel text-[9px] uppercase text-[var(--muted)]">
@@ -31,14 +75,20 @@ export function LatestClaims() {
           <tbody className="divide-y-[2px] divide-[var(--panel-border)]/50">
             {loading && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-[var(--muted)]">
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-[var(--muted)]"
+                >
                   Loading on-chain data…
                 </td>
               </tr>
             )}
             {!loading && claims.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-[var(--muted)]">
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-[var(--muted)]"
+                >
                   No claims yet — be the first!
                 </td>
               </tr>

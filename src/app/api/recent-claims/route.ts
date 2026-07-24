@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
+import {
+  clientKey,
+  rateLimit,
+  rateLimitHeaders,
+} from "@/lib/rate-limit";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export interface RecentClaim {
   signature: string;
-  /** Unix seconds. */
   blockTime: number;
-  /** Wallet that performed the claim (fee payer). */
   wallet: string;
-  /** Number of token accounts closed in this transaction. */
   accountsClosed: number;
-  /** Net lamports the user's wallet gained (after all fees). */
   reclaimedLamports: number;
 }
 
@@ -29,12 +33,34 @@ const EMPTY: LedgerResponse = {
   stats: { totalClaims: 0, totalAccountsClosed: 0, totalReclaimedLamports: 0 },
 };
 
+const LIMIT = 20; // ledger polls per minute per client
+const WINDOW_MS = 60_000;
+
 /**
- * Public, read-only ledger. The fee wallet's on-chain history IS the
- * database: every claim includes a fee transfer to the fee wallet, so
- * listing its signatures reconstructs all claims. No user data stored.
+ * Public read-only ledger. Fee wallet history IS the database.
+ * Rate-limited to stop spam polling from burning RPC credits.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const key = clientKey(req, "claims");
+  const limited = rateLimit(key, LIMIT, WINDOW_MS);
+  if (!limited.ok) {
+    return NextResponse.json(
+      {
+        ...EMPTY,
+        configured: true,
+        error: "Too many requests. Please wait.",
+        retryAfterSec: limited.retryAfterSec,
+      },
+      {
+        status: 429,
+        headers: {
+          ...rateLimitHeaders(limited, LIMIT),
+          "Cache-Control": "no-store",
+        },
+      }
+    );
+  }
+
   const feeWalletAddress = process.env.NEXT_PUBLIC_FEE_WALLET;
   const rpcUrl =
     process.env.HELIUS_RPC_URL ||
@@ -42,17 +68,25 @@ export async function GET() {
     clusterApiUrl("mainnet-beta");
 
   if (!feeWalletAddress) {
-    return NextResponse.json(EMPTY, { headers: cacheHeaders() });
+    return NextResponse.json(EMPTY, {
+      headers: {
+        ...rateLimitHeaders(limited, LIMIT),
+        ...cacheHeaders(),
+      },
+    });
   }
 
   try {
-    const connection = new Connection(rpcUrl, "confirmed");
+    const connection = new Connection(rpcUrl, {
+      commitment: "confirmed",
+      disableRetryOnRateLimit: true,
+    });
     const feeWallet = new PublicKey(feeWalletAddress);
 
     const signatures = await connection.getSignaturesForAddress(feeWallet, {
-      limit: 200,
+      limit: 80,
     });
-    const successful = signatures.filter((s) => !s.err);
+    const successful = signatures.filter((s) => !s.err).slice(0, 40);
 
     const txs = await connection.getParsedTransactions(
       successful.map((s) => s.signature),
@@ -65,14 +99,13 @@ export async function GET() {
       const tx = txs[i];
       if (!tx || tx.meta?.err) continue;
 
-      // Count token account closes in this transaction.
       let accountsClosed = 0;
       for (const ix of tx.transaction.message.instructions) {
         if ("parsed" in ix && ix.parsed?.type === "closeAccount") {
           accountsClosed++;
         }
       }
-      if (accountsClosed === 0) continue; // not a claim tx (random transfer etc.)
+      if (accountsClosed === 0) continue;
 
       const keys = tx.transaction.message.accountKeys;
       const feePayerIndex = keys.findIndex((k) => k.signer);
@@ -105,12 +138,23 @@ export async function GET() {
       },
     };
 
-    return NextResponse.json(body, { headers: cacheHeaders() });
+    return NextResponse.json(body, {
+      headers: {
+        ...rateLimitHeaders(limited, LIMIT),
+        ...cacheHeaders(60),
+      },
+    });
   } catch (err) {
     console.error("recent-claims failed:", err);
     return NextResponse.json(
       { ...EMPTY, configured: true },
-      { status: 200, headers: cacheHeaders(30) }
+      {
+        status: 200,
+        headers: {
+          ...rateLimitHeaders(limited, LIMIT),
+          ...cacheHeaders(30),
+        },
+      }
     );
   }
 }
