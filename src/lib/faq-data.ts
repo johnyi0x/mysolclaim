@@ -22,7 +22,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "How does the referral program work?",
     answer:
-      "Connect on the Referral page to get a link like mysolclaim.com/?ref=YOUR_WALLET. When someone claims after using your link, they still pay the normal service fee; a fixed share of that fee (default 20%, so an 80/20 split with the platform) is tipped to your wallet in the same transaction. Keep about 0.001 SOL in your wallet so Solana can land those tips. Details and your cumulative on-chain earnings are on /referral.",
+      "Connect on the Referral page to get a link like mysolclaim.com/?ref=YOUR_WALLET. When someone claims after using your link, they still pay the normal service fee; a fixed share of that fee (default 30%, so a 70/30 split with the platform) is tipped to your wallet in the same transaction. Keep about 0.001 SOL in your wallet so Solana can land those tips. Details and your cumulative on-chain earnings are on /referral.",
   },
   {
     question: "Which wallets are supported?",

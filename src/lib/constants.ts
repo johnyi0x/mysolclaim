@@ -51,11 +51,11 @@ export const X_URL = "https://x.com/mysolclaim";
 
 /**
  * Percent of the *service fee* paid to a referrer (rest stays with platform).
- * Example: FEE_PERCENT=10 and this=20 → user pays 10% fee; referrer gets 2% of
- * reclaimed SOL, platform keeps 8%. Scales automatically if FEE_PERCENT changes.
+ * Example: FEE_PERCENT=10 and this=30 → user pays 10% fee; referrer gets 3% of
+ * reclaimed SOL, platform keeps 7% (70/30 of the fee). Scales if FEE_PERCENT changes.
  */
 export const REFERRAL_SHARE_PERCENT = (() => {
-  const raw = Number(process.env.NEXT_PUBLIC_REFERRAL_SHARE_PERCENT ?? "20");
-  if (!Number.isFinite(raw)) return 20;
+  const raw = Number(process.env.NEXT_PUBLIC_REFERRAL_SHARE_PERCENT ?? "30");
+  if (!Number.isFinite(raw)) return 30;
   return Math.min(50, Math.max(0, Math.floor(raw)));
 })();
