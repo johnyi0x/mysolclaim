@@ -17,7 +17,12 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "What is the fee and how is it taken?",
     answer:
-      "We keep a small percentage of the reclaimed rent (shown before you sign). The fee is a simple transfer inside the same transaction that closes your accounts, so it is atomic: either you receive your SOL and we receive the fee, or nothing happens at all. You never pay out of pocket, and you can verify every fee our wallet has ever received on Solscan — the address is in the footer.",
+      "We keep a small percentage of the reclaimed rent (shown before you sign). The fee is a simple transfer inside the same transaction that closes your accounts, so it is atomic: either you receive your SOL and we receive the fee, or nothing happens at all. You never pay out of pocket, and you can verify every fee our wallet has ever received on Solscan — the address is in the footer. If you arrived via a referral link, that same fee is split on-chain between the platform and the referrer — you still pay the same total percentage.",
+  },
+  {
+    question: "How does the referral program work?",
+    answer:
+      "Connect on the Referral page to get a link like mysolclaim.com/?ref=YOUR_WALLET. When someone claims after using your link, they still pay the normal service fee; a fixed share of that fee (default 20%, so an 80/20 split with the platform) is tipped to your wallet in the same transaction. Keep about 0.001 SOL in your wallet so Solana can land those tips. Details and your cumulative on-chain earnings are on /referral.",
   },
   {
     question: "Which wallets are supported?",

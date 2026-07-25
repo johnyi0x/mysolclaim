@@ -11,6 +11,7 @@ import {
   buildPumpCashbackInstructions,
   type PumpCashbackOpportunity,
 } from "./pump-cashback";
+import { splitServiceFee } from "./referral";
 import type { EmptyTokenAccount } from "./scan";
 
 export type ClaimActionType = "vacant_account" | "pump_cashback";
@@ -20,8 +21,10 @@ export interface ClaimBatch {
   accounts: EmptyTokenAccount[];
   /** Total rent / reclaimable (lamports) refunded to the user by this batch. */
   rentLamports: number;
-  /** Service fee (lamports) transferred to the fee wallet in the same tx. */
+  /** Total service fee (platform + referrer cuts). */
   feeLamports: number;
+  platformFeeLamports: number;
+  referrerFeeLamports: number;
   action: ClaimActionType;
   blockhash: string;
   lastValidBlockHeight: number;
@@ -34,40 +37,37 @@ export function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export function computeFee(rentLamports: number): number {
-  // Floor so we never over-charge relative to the displayed percentage.
   return Math.floor((rentLamports * FEE_PERCENT) / 100);
 }
 
 /**
- * Append service-fee transfer.
- *
- * Critical: if the fee wallet account does not exist yet (or is below
- * rent-exempt), SystemProgram.transfer *creates/funds* it. The transfer
- * amount MUST be >= rent-exempt minimum or Solana returns
- * InsufficientFundsForRent on the fee-wallet account index — which is the
- * failure users were seeing on both Pump and vacant claims.
+ * Append platform (+ optional referrer) fee transfers.
+ * Referral cut comes from the service fee — referred user does not pay extra.
  */
 async function appendFeeTransfer(
   connection: Connection,
   tx: Transaction,
   user: PublicKey,
-  reclaimableLamports: number
-): Promise<number> {
+  reclaimableLamports: number,
+  referrer: PublicKey | null
+): Promise<{
+  totalFee: number;
+  platformFee: number;
+  referrerFee: number;
+}> {
   if (!FEE_WALLET || FEE_PERCENT <= 0 || reclaimableLamports <= 0) {
-    return 0;
+    return { totalFee: 0, platformFee: 0, referrerFee: 0 };
   }
 
   let feeLamports = computeFee(reclaimableLamports);
 
-  // Fallback ~890880 if RPC method is unavailable (keeps claims working).
   let rent0 = 890_880;
   try {
     rent0 = await connection.getMinimumBalanceForRentExemption(0);
   } catch {
-    // ignore — use fallback
+    // fallback
   }
 
-  // true = fee wallet already rent-exempt on-chain (normal 10% tip is fine)
   let feeWalletReady = true;
   try {
     const feeInfo = await connection.getAccountInfo(FEE_WALLET, "confirmed");
@@ -79,7 +79,6 @@ async function appendFeeTransfer(
       feeLamports = Math.max(feeLamports, rent0 - feeInfo.lamports);
     }
   } catch {
-    // Assume funded if we cannot read (user already sent SOL).
     feeWalletReady = true;
   }
 
@@ -91,26 +90,66 @@ async function appendFeeTransfer(
     );
   }
 
-  if (safeFee > 0) {
+  // Until platform fee wallet is rent-safe, skip referral split (all → platform).
+  const useReferrer = Boolean(referrer && feeWalletReady);
+
+  let { platformLamports, referrerLamports } = splitServiceFee(
+    safeFee,
+    useReferrer
+  );
+
+  // If referrer wallet is missing / under-rented and cut is too small to create it,
+  // skip referral this tx (avoid InsufficientFundsForRent) — all fee → platform.
+  if (referrer && referrerLamports > 0) {
+    try {
+      const refInfo = await connection.getAccountInfo(referrer, "confirmed");
+      if (!refInfo && referrerLamports < rent0) {
+        platformLamports += referrerLamports;
+        referrerLamports = 0;
+      } else if (refInfo && refInfo.lamports < rent0) {
+        const need = rent0 - refInfo.lamports;
+        if (referrerLamports < need) {
+          platformLamports += referrerLamports;
+          referrerLamports = 0;
+        }
+      }
+    } catch {
+      // If we cannot read referrer, still attempt the tip (wallet usually exists).
+    }
+  }
+
+  if (platformLamports > 0) {
     tx.add(
       SystemProgram.transfer({
         fromPubkey: user,
         toPubkey: FEE_WALLET,
-        lamports: safeFee,
+        lamports: platformLamports,
       })
     );
   }
 
-  return safeFee;
+  if (referrer && referrerLamports > 0) {
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: user,
+        toPubkey: referrer,
+        lamports: referrerLamports,
+      })
+    );
+  }
+
+  return {
+    totalFee: platformLamports + referrerLamports,
+    platformFee: platformLamports,
+    referrerFee: referrerLamports,
+  };
 }
 
-/**
- * Build Pump.fun cashback claim + close volume accumulator + service fee.
- */
 export async function buildPumpCashbackTransaction(
   connection: Connection,
   user: PublicKey,
-  opportunity: PumpCashbackOpportunity
+  opportunity: PumpCashbackOpportunity,
+  referrer: PublicKey | null = null
 ): Promise<ClaimBatch> {
   if (!FEE_WALLET && FEE_PERCENT > 0) {
     throw new Error(
@@ -138,36 +177,32 @@ export async function buildPumpCashbackTransaction(
     tx.add(ix);
   }
 
-  const feeLamports = await appendFeeTransfer(
+  const fees = await appendFeeTransfer(
     connection,
     tx,
     user,
-    opportunity.lamports
+    opportunity.lamports,
+    referrer
   );
 
   return {
     transaction: tx,
     accounts: [],
     rentLamports: opportunity.lamports,
-    feeLamports,
+    feeLamports: fees.totalFee,
+    platformFeeLamports: fees.platformFee,
+    referrerFeeLamports: fees.referrerFee,
     action: "pump_cashback",
     blockhash,
     lastValidBlockHeight,
   };
 }
 
-/**
- * Build one or more transactions that close the selected empty accounts.
- *
- * Security invariants:
- * - Rent destination is ALWAYS the connected user (never the fee wallet).
- * - Fee is a separate SystemProgram.transfer in the SAME atomic tx.
- * - Only accounts already filtered as amount===0 + closable are included.
- */
 export async function buildClaimTransactions(
   connection: Connection,
   user: PublicKey,
-  selected: EmptyTokenAccount[]
+  selected: EmptyTokenAccount[],
+  referrer: PublicKey | null = null
 ): Promise<ClaimBatch[]> {
   if (!FEE_WALLET && FEE_PERCENT > 0) {
     throw new Error(
@@ -189,7 +224,6 @@ export async function buildClaimTransactions(
       lastValidBlockHeight,
     });
 
-    // Token-2022 closes with extensions need more CU than classic SPL.
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({
         units: Math.max(50_000, 25_000 * accounts.length + 20_000),
@@ -204,26 +238,29 @@ export async function buildClaimTransactions(
       tx.add(
         createCloseAccountInstruction(
           new PublicKey(acc.address),
-          user, // rent → user
-          user, // authority → user
+          user,
+          user,
           [],
           programId
         )
       );
     }
 
-    const feeLamports = await appendFeeTransfer(
+    const fees = await appendFeeTransfer(
       connection,
       tx,
       user,
-      rentLamports
+      rentLamports,
+      referrer
     );
 
     results.push({
       transaction: tx,
       accounts,
       rentLamports,
-      feeLamports,
+      feeLamports: fees.totalFee,
+      platformFeeLamports: fees.platformFee,
+      referrerFeeLamports: fees.referrerFee,
       action: "vacant_account",
       blockhash,
       lastValidBlockHeight,

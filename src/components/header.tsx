@@ -44,6 +44,9 @@ export function Header() {
           <Link href="/#how-it-works" className="hover:text-[var(--accent)]">
             How it works
           </Link>
+          <Link href="/referral" className="hover:text-[var(--accent)]">
+            Referral
+          </Link>
           <Link href="/security" className="hover:text-[var(--accent)]">
             Security
           </Link>
@@ -74,6 +77,7 @@ export function Header() {
           <nav className="flex flex-col gap-1 text-lg uppercase text-[var(--muted)]">
             {[
               { href: "/#how-it-works", label: "How it works" },
+              { href: "/referral", label: "Referral" },
               { href: "/security", label: "Security" },
               { href: "/faq", label: "FAQ" },
               { href: "/terms", label: "Terms" },

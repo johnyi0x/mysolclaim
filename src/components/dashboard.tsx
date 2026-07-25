@@ -18,6 +18,8 @@ import {
 } from "@/lib/constants";
 import { formatSol, truncateAddress } from "@/lib/format";
 import type { PumpCashbackOpportunity } from "@/lib/pump-cashback";
+import { getStoredReferrer } from "@/lib/referral";
+import { fetchEffectiveReferrer } from "@/lib/resolve-referrer";
 import type { EmptyTokenAccount } from "@/lib/scan";
 import { notifyClaimsUpdated } from "@/lib/use-ledger";
 
@@ -49,6 +51,7 @@ export function Dashboard() {
   const [results, setResults] = useState<BatchResult[]>([]);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [referralActive, setReferralActive] = useState(false);
   const lastScanAt = useRef(0);
 
   const scan = useCallback(async () => {
@@ -108,6 +111,7 @@ export function Dashboard() {
     setPhase("idle");
     setClaimError(null);
     lastScanAt.current = 0;
+    setReferralActive(Boolean(getStoredReferrer()));
     if (publicKey) scan();
   }, [publicKey]); // eslint-disable-line react-hooks/exhaustive-deps -- only on wallet change
 
@@ -204,13 +208,18 @@ export function Dashboard() {
       let step = 0;
       const total = txCount;
 
+      // Resolve referrer once (bind + localStorage). Never blocks claim on failure.
+      setProgress("Resolving referral…");
+      const referrer = await fetchEffectiveReferrer(publicKey);
+
       if (includePump && pumpCashback) {
         step++;
         setProgress(`(${step}/${total}) Building Pump.fun cashback…`);
         const batch = await buildPumpCashbackTransaction(
           connection,
           publicKey,
-          pumpCashback
+          pumpCashback,
+          referrer
         );
         const result = await sendBatch(
           batch,
@@ -229,7 +238,8 @@ export function Dashboard() {
         const [batch] = await buildClaimTransactions(
           connection,
           publicKey,
-          slice
+          slice,
+          referrer
         );
         const result = await sendBatch(
           batch,
@@ -358,6 +368,9 @@ export function Dashboard() {
                 {formatSol(fee)}
                 {txCount > 0
                   ? ` · sign ${txCount} tx${txCount === 1 ? "" : "s"}`
+                  : ""}
+                {referralActive
+                  ? " · referral attributed (fee split on-chain)"
                   : ""}
               </p>
             )}

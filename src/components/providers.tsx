@@ -1,6 +1,7 @@
 "use client";
 
 import { ThemeProvider } from "next-themes";
+import { ReferralCapture } from "./referral-capture";
 import { WalletProviders } from "./wallet-providers";
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -11,7 +12,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       enableSystem
       disableTransitionOnChange
     >
-      <WalletProviders>{children}</WalletProviders>
+      <WalletProviders>
+        <ReferralCapture />
+        {children}
+      </WalletProviders>
     </ThemeProvider>
   );
 }
