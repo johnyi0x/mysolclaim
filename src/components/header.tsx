@@ -81,7 +81,7 @@ export function Header() {
               { href: "/security", label: "Security" },
               { href: "/faq", label: "FAQ" },
               { href: "/terms", label: "Terms" },
-              { href: "https://x.com/mysolclaim", label: "X / Twitter ↗", external: true },
+              { href: "https://x.com/JohnYi0x", label: "X / Twitter ↗", external: true },
             ].map((item) =>
               "external" in item && item.external ? (
                 <a

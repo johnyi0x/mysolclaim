@@ -47,7 +47,7 @@ export const SOLSCAN_ACCOUNT = (addr: string) =>
   `https://solscan.io/account/${addr}`;
 
 /** Official X / Twitter account. */
-export const X_URL = "https://x.com/mysolclaim";
+export const X_URL = "https://x.com/JohnYi0x";
 
 /**
  * Percent of the *service fee* paid to a referrer (rest stays with platform).
