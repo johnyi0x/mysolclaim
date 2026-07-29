@@ -26,6 +26,7 @@ import { notifyClaimsUpdated } from "@/lib/use-ledger";
 interface BatchResult {
   signature: string;
   accountsClosed: number;
+  closedAddresses: string[];
   rentLamports: number;
   feeLamports: number;
   action: "vacant_account" | "pump_cashback";
@@ -34,6 +35,8 @@ interface BatchResult {
 type Phase = "idle" | "claiming" | "done";
 
 const SCAN_COOLDOWN_MS = 8_000;
+/** RPC often lags right after close — wait before rescanning. */
+const POST_CLAIM_RESCAN_MS = 2_500;
 
 export function Dashboard() {
   const { connection } = useConnection();
@@ -53,6 +56,27 @@ export function Dashboard() {
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [referralActive, setReferralActive] = useState(false);
   const lastScanAt = useRef(0);
+  const postClaimRescanRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearClaimedFromUi = useCallback((completed: BatchResult[]) => {
+    const closed = new Set(completed.flatMap((r) => r.closedAddresses));
+    const claimedPump = completed.some((r) => r.action === "pump_cashback");
+
+    if (closed.size > 0) {
+      setAccounts((prev) =>
+        prev ? prev.filter((a) => !closed.has(a.address)) : prev
+      );
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const addr of closed) next.delete(addr);
+        return next;
+      });
+    }
+    if (claimedPump) {
+      setPumpCashback(null);
+      setIncludePump(false);
+    }
+  }, []);
 
   const scan = useCallback(async () => {
     if (!publicKey) return;
@@ -104,6 +128,19 @@ export function Dashboard() {
     }
   }, [publicKey]);
 
+  const schedulePostClaimRescan = useCallback(() => {
+    if (postClaimRescanRef.current) {
+      clearTimeout(postClaimRescanRef.current);
+    }
+    lastScanAt.current = 0;
+    setProgress("Refreshing wallet…");
+    postClaimRescanRef.current = setTimeout(() => {
+      postClaimRescanRef.current = null;
+      setProgress(null);
+      void scan();
+    }, POST_CLAIM_RESCAN_MS);
+  }, [scan]);
+
   useEffect(() => {
     setAccounts(null);
     setPumpCashback(null);
@@ -111,8 +148,18 @@ export function Dashboard() {
     setPhase("idle");
     setClaimError(null);
     lastScanAt.current = 0;
+    if (postClaimRescanRef.current) {
+      clearTimeout(postClaimRescanRef.current);
+      postClaimRescanRef.current = null;
+    }
     setReferralActive(Boolean(getStoredReferrer()));
     if (publicKey) scan();
+    return () => {
+      if (postClaimRescanRef.current) {
+        clearTimeout(postClaimRescanRef.current);
+        postClaimRescanRef.current = null;
+      }
+    };
   }, [publicKey]); // eslint-disable-line react-hooks/exhaustive-deps -- only on wallet change
 
   const closable = useMemo(
@@ -191,6 +238,7 @@ export function Dashboard() {
     return {
       signature,
       accountsClosed: batch.accounts.length,
+      closedAddresses: batch.accounts.map((a) => a.address),
       rentLamports: batch.rentLamports,
       feeLamports: batch.feeLamports,
       action: batch.action,
@@ -254,10 +302,9 @@ export function Dashboard() {
       setProgress(null);
       setPhase("done");
       if (completed.length > 0) {
+        clearClaimedFromUi(completed);
         notifyClaimsUpdated();
-        lastScanAt.current = 0;
-        // Soft rescan so vacant/pump panels update — don't block success UI.
-        void scan();
+        schedulePostClaimRescan();
       }
     } catch (err) {
       console.error(err);
@@ -283,9 +330,9 @@ export function Dashboard() {
       setPhase("done");
       if (completed.length > 0) {
         setResults([...completed]);
+        clearClaimedFromUi(completed);
         notifyClaimsUpdated();
-        lastScanAt.current = 0;
-        void scan();
+        schedulePostClaimRescan();
       }
     }
   };
