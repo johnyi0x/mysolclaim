@@ -57,14 +57,21 @@ export function Dashboard() {
   const [referralActive, setReferralActive] = useState(false);
   const lastScanAt = useRef(0);
   const postClaimRescanRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Addresses confirmed closed this session — filter every scan result through this. */
+  const confirmedClosedRef = useRef<Set<string>>(new Set());
+  /** Whether pump cashback was confirmed claimed this session. */
+  const confirmedPumpRef = useRef(false);
 
   const clearClaimedFromUi = useCallback((completed: BatchResult[]) => {
     const closed = new Set(completed.flatMap((r) => r.closedAddresses));
     const claimedPump = completed.some((r) => r.action === "pump_cashback");
 
+    for (const addr of closed) confirmedClosedRef.current.add(addr);
+    if (claimedPump) confirmedPumpRef.current = true;
+
     if (closed.size > 0) {
       setAccounts((prev) =>
-        prev ? prev.filter((a) => !closed.has(a.address)) : prev
+        prev ? prev.filter((a) => !confirmedClosedRef.current.has(a.address)) : prev
       );
       setSelected((prev) => {
         const next = new Set(prev);
@@ -110,11 +117,15 @@ export function Dashboard() {
         setScanError(data.error || "Scan failed. Please try again.");
         return;
       }
-      const found = (data.accounts ?? []) as EmptyTokenAccount[];
+      const rawFound = (data.accounts ?? []) as EmptyTokenAccount[];
       const pump = (data.pumpCashback ?? null) as PumpCashbackOpportunity | null;
+      // Always exclude confirmed-closed accounts regardless of RPC lag.
+      const found = rawFound.filter(
+        (a) => !confirmedClosedRef.current.has(a.address)
+      );
       setAccounts(found);
-      setPumpCashback(pump);
-      setIncludePump(Boolean(pump));
+      setPumpCashback(confirmedPumpRef.current ? null : pump);
+      setIncludePump(confirmedPumpRef.current ? false : Boolean(pump));
       setSelected(
         new Set(found.filter((a) => a.closable).map((a) => a.address))
       );
@@ -148,6 +159,8 @@ export function Dashboard() {
     setPhase("idle");
     setClaimError(null);
     lastScanAt.current = 0;
+    confirmedClosedRef.current = new Set();
+    confirmedPumpRef.current = false;
     if (postClaimRescanRef.current) {
       clearTimeout(postClaimRescanRef.current);
       postClaimRescanRef.current = null;
