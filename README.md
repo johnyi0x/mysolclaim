@@ -14,11 +14,21 @@ Next.js (App Router) · TypeScript · Tailwind CSS v3 · `@solana/web3.js` ·
 | --- | --- | --- |
 | `NEXT_PUBLIC_FEE_WALLET` | yes | Fee wallet public address |
 | `NEXT_PUBLIC_FEE_PERCENT` | no (default 10) | Fee % |
+| `NEXT_PUBLIC_REFERRAL_SHARE_PERCENT` | no (default 30) | Referrer cut of the service fee |
+| `NEON_CONNECTION_STRING` | yes for accurate stats | Neon Postgres URL (server-only) — durable all-time + 24h stats |
 | `HELIUS_RPC_URL` | optional fallback | Private RPC URL+key (server-only; used only if public fails) |
+| `UPSTASH_REDIS_REST_URL` / `TOKEN` | optional | Durable referral bind across devices |
 
 **RPC order:** public Solana RPC first → `HELIUS_RPC_URL` only if public fails.
-JSON-RPC **batches are never sent** (free Helius compatible). Ledger fetch is
-kept light (~40 sigs / ~24 parses) so public rate limits are less likely.
+JSON-RPC **batches are never sent** (free Helius compatible).
+
+**Ledger / stats:** With `NEON_CONNECTION_STRING`, `/api/recent-claims` seeds
+fee-wallet history into Neon once, then incrementally inserts only new claims.
+All-time users/SOL/claims persist forever; 24h is queried from stored rows.
+Without Neon, the API falls back to a short RPC window (stats can shrink).
+
+**Security:** `NEON_CONNECTION_STRING` must never be `NEXT_PUBLIC_*`. Clients
+cannot write stats — only server sync from on-chain fee-wallet txs (rate-limited).
 
 ## Anti-spam
 

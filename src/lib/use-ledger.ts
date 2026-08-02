@@ -18,14 +18,18 @@ export function useLedger() {
   const lastFetch = useRef(0);
   const inFlight = useRef(false);
 
-  const refresh = useCallback(async (force = false) => {
+  const refresh = useCallback(async (force = false, syncChain = false) => {
     const now = Date.now();
     if (inFlight.current) return;
     if (!force && now - lastFetch.current < MIN_POLL_GAP_MS && data) return;
 
     inFlight.current = true;
     try {
-      const res = await fetch("/api/recent-claims", { cache: "no-store" });
+      // syncChain=true only after a successful claim — forces Neon incremental ingest.
+      const url = syncChain
+        ? "/api/recent-claims?sync=1"
+        : "/api/recent-claims";
+      const res = await fetch(url, { cache: "no-store" });
       if (res.status === 429) {
         // Back off quietly — keep last good data.
         return;
@@ -43,9 +47,9 @@ export function useLedger() {
   }, [data]);
 
   useEffect(() => {
-    refresh(true);
+    refresh(true, false);
     const onUpdate = () => {
-      setTimeout(() => refresh(true), 4000);
+      setTimeout(() => refresh(true, true), 4000);
     };
     window.addEventListener(CLAIMS_UPDATED_EVENT, onUpdate);
     return () => window.removeEventListener(CLAIMS_UPDATED_EVENT, onUpdate);

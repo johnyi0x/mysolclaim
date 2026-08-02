@@ -79,7 +79,7 @@ export function Hero() {
         )}
         {stats && stats.totalClaims > 0 && (
           <p className="mt-3 px-2 text-sm text-[var(--muted)] sm:text-base">
-            *from recent on-chain history of our public fee wallet
+            *stacked on-chain claims via fee wallet (all-time + live sync)
           </p>
         )}
       </div>

@@ -53,7 +53,7 @@ export function ClaimStats() {
         &gt; claim_stats
       </h2>
       <p className="mx-auto mt-3 max-w-xl px-2 text-center text-lg text-[var(--muted)] sm:text-xl">
-        From recent fee-wallet history (light scan for RPC efficiency).
+        Stacked from on-chain fee-wallet claims (durable totals + last 24h).
       </p>
 
       <div className="mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">

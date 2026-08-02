@@ -1,152 +1,53 @@
 import { NextResponse } from "next/server";
 import {
-  PublicKey,
-  type Connection,
-  type ParsedTransactionWithMeta,
-} from "@solana/web3.js";
-import {
   clientKey,
   isAllowedOrigin,
   rateLimit,
   rateLimitHeaders,
 } from "@/lib/rate-limit";
+import { isNeonConfigured } from "@/lib/db";
+import {
+  EMPTY_STATS,
+  readLedgerSnapshot,
+  syncLedgerFromChain,
+  type ClaimActionType,
+  type LedgerStats,
+  type RecentClaim,
+} from "@/lib/ledger-store";
 import { withRpcFallback } from "@/lib/rpc";
-import { PUMP_PROGRAM_ID } from "@/lib/pump-cashback";
 import {
   LEDGER_DISPLAY_LIMIT,
   LEDGER_HISTORY_CAP,
   LEDGER_PARSE_LIMIT,
 } from "@/lib/constants";
+import { PublicKey } from "@solana/web3.js";
+import { parseClaimFromTx } from "@/lib/ledger-parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export type ClaimActionType =
-  | "vacant_account"
-  | "pump_cashback"
-  | "burn_token"
-  | "mixed";
-
-export interface RecentClaim {
-  signature: string;
-  blockTime: number;
-  wallet: string;
-  accountsClosed: number;
-  reclaimedLamports: number;
-  action: ClaimActionType;
-}
-
-export interface LedgerStats {
-  totalClaims: number;
-  totalUsers: number;
-  totalReclaimedLamports: number;
-  totalAccountsClosed: number;
-  claims24h: number;
-  users24h: number;
-  reclaimedLamports24h: number;
-}
+export type { ClaimActionType, LedgerStats, RecentClaim };
 
 export interface LedgerResponse {
   configured: boolean;
+  durable?: boolean;
   claims: RecentClaim[];
   stats: LedgerStats;
 }
 
-const EMPTY_STATS: LedgerStats = {
-  totalClaims: 0,
-  totalUsers: 0,
-  totalReclaimedLamports: 0,
-  totalAccountsClosed: 0,
-  claims24h: 0,
-  users24h: 0,
-  reclaimedLamports24h: 0,
-};
-
 const EMPTY: LedgerResponse = {
   configured: false,
+  durable: false,
   claims: [],
   stats: EMPTY_STATS,
 };
 
 const LIMIT = 20;
 const WINDOW_MS = 60_000;
-const DAY_SEC = 86_400;
-
-function programIdOf(ix: { programId?: unknown; program?: unknown }): string | null {
-  const raw = ix.programId ?? ix.program;
-  if (raw == null) return null;
-  if (typeof raw === "string") return raw;
-  if (typeof raw === "object" && raw !== null && "toBase58" in raw) {
-    try {
-      return (raw as PublicKey).toBase58();
-    } catch {
-      return null;
-    }
-  }
-  return String(raw);
-}
-
-function classifyAction(tx: ParsedTransactionWithMeta): {
-  action: ClaimActionType | null;
-  accountsClosed: number;
-} {
-  let accountsClosed = 0;
-  let hasPump = false;
-  const pumpId = PUMP_PROGRAM_ID.toBase58();
-
-  const considerIx = (ix: {
-    programId?: unknown;
-    program?: unknown;
-    parsed?: { type?: string };
-  }) => {
-    if (ix.parsed?.type === "closeAccount") {
-      accountsClosed++;
-    }
-    const pid = programIdOf(ix);
-    if (pid === pumpId) hasPump = true;
-  };
-
-  for (const ix of tx.transaction.message.instructions) {
-    considerIx(ix as { programId?: unknown; parsed?: { type?: string } });
-  }
-  for (const group of tx.meta?.innerInstructions ?? []) {
-    for (const ix of group.instructions) {
-      considerIx(ix as { programId?: unknown; parsed?: { type?: string } });
-    }
-  }
-
-  if (hasPump && accountsClosed > 0) return { action: "mixed", accountsClosed };
-  if (hasPump) return { action: "pump_cashback", accountsClosed: 0 };
-  if (accountsClosed > 0) return { action: "vacant_account", accountsClosed };
-  return { action: null, accountsClosed: 0 };
-}
 
 /**
- * One RPC call per signature — never getParsedTransactions (JSON-RPC batch).
- * Free Helius rejects batches; public RPC also hates big bursts.
- */
-async function getParsedTransactionsSingle(
-  connection: Connection,
-  signatures: string[]
-): Promise<(ParsedTransactionWithMeta | null)[]> {
-  const out: (ParsedTransactionWithMeta | null)[] = [];
-  for (const signature of signatures) {
-    try {
-      const tx = await connection.getParsedTransaction(signature, {
-        maxSupportedTransactionVersion: 0,
-        commitment: "confirmed",
-      });
-      out.push(tx);
-    } catch {
-      out.push(null);
-    }
-  }
-  return out;
-}
-
-/**
- * Public read-only ledger. Fee wallet history IS the database.
- * Light fetch: public RPC first, free-Helius-safe (no batches).
+ * Public ledger + stats.
+ * Prefer Neon durable store (seed once, then incremental). Fallback: short RPC window.
  */
 export async function GET(req: Request) {
   if (!isAllowedOrigin(req)) {
@@ -173,7 +74,9 @@ export async function GET(req: Request) {
     );
   }
 
-  const feeWalletAddress = process.env.NEXT_PUBLIC_FEE_WALLET;
+  const feeWalletAddress = process.env.NEXT_PUBLIC_FEE_WALLET?.trim();
+  const forceSync =
+    new URL(req.url).searchParams.get("sync") === "1";
 
   if (!feeWalletAddress) {
     return NextResponse.json(EMPTY, {
@@ -184,58 +87,76 @@ export async function GET(req: Request) {
     });
   }
 
+  // —— Durable path (Neon) ——
+  if (isNeonConfigured()) {
+    try {
+      await withRpcFallback(async (connection) => {
+        await syncLedgerFromChain(connection, feeWalletAddress, {
+          force: forceSync,
+        });
+      });
+
+      const snapshot = await readLedgerSnapshot();
+      return NextResponse.json(
+        {
+          configured: true,
+          durable: true,
+          claims: snapshot.claims,
+          stats: snapshot.stats,
+        } satisfies LedgerResponse,
+        {
+          headers: {
+            ...rateLimitHeaders(limited, LIMIT),
+            ...cacheHeaders(60),
+          },
+        }
+      );
+    } catch (err) {
+      // Never leak connection / SQL details to clients
+      console.error("recent-claims neon path failed");
+      console.error(err instanceof Error ? err.message : "unknown error");
+      // Fall through to RPC-only degraded mode
+    }
+  }
+
+  // —— Fallback: short RPC window (no Neon / Neon error) ——
   try {
     const body = await withRpcFallback(async (connection) => {
       const feeWallet = new PublicKey(feeWalletAddress);
-
-      // Single page of signatures — enough for a live feed + rough stats.
       const allSigs = await connection.getSignaturesForAddress(feeWallet, {
         limit: LEDGER_HISTORY_CAP,
       });
       const successful = allSigs.filter((s) => !s.err);
       const toParse = successful.slice(0, LEDGER_PARSE_LIMIT);
 
-      const txs = await getParsedTransactionsSingle(
-        connection,
-        toParse.map((s) => s.signature)
-      );
-
       const claims: RecentClaim[] = [];
-      for (let i = 0; i < txs.length; i++) {
-        const tx = txs[i];
-        if (!tx || tx.meta?.err) continue;
-
-        const { action, accountsClosed } = classifyAction(tx);
-        if (!action) continue;
-
-        const keys = tx.transaction.message.accountKeys;
-        const feePayerIndex = keys.findIndex((k) => k.signer);
-        if (feePayerIndex === -1) continue;
-
-        const pre = tx.meta?.preBalances?.[feePayerIndex] ?? 0;
-        const post = tx.meta?.postBalances?.[feePayerIndex] ?? 0;
-        const reclaimedLamports = post - pre;
-        if (reclaimedLamports <= 0) continue;
-
-        claims.push({
-          signature: toParse[i].signature,
-          blockTime: tx.blockTime ?? toParse[i].blockTime ?? 0,
-          wallet: keys[feePayerIndex].pubkey.toBase58(),
-          accountsClosed,
-          reclaimedLamports,
-          action,
-        });
+      for (const info of toParse) {
+        try {
+          const tx = await connection.getParsedTransaction(info.signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: "confirmed",
+          });
+          const claim = parseClaimFromTx(
+            info.signature,
+            tx,
+            info.blockTime ?? 0
+          );
+          if (claim) claims.push(claim);
+        } catch {
+          // skip
+        }
       }
 
       const nowSec = Math.floor(Date.now() / 1000);
       const users = new Set(claims.map((c) => c.wallet));
       const last24 = claims.filter(
-        (c) => c.blockTime > 0 && nowSec - c.blockTime <= DAY_SEC
+        (c) => c.blockTime > 0 && nowSec - c.blockTime <= 86_400
       );
       const users24 = new Set(last24.map((c) => c.wallet));
 
       const result: LedgerResponse = {
         configured: true,
+        durable: false,
         claims: claims.slice(0, LEDGER_DISPLAY_LIMIT),
         stats: {
           totalClaims: claims.length,
@@ -262,11 +183,12 @@ export async function GET(req: Request) {
     return NextResponse.json(body, {
       headers: {
         ...rateLimitHeaders(limited, LIMIT),
-        ...cacheHeaders(120),
+        ...cacheHeaders(60),
       },
     });
   } catch (err) {
-    console.error("recent-claims failed:", err);
+    console.error("recent-claims rpc fallback failed");
+    console.error(err instanceof Error ? err.message : "unknown error");
     return NextResponse.json(
       { ...EMPTY, configured: true },
       {
@@ -282,6 +204,6 @@ export async function GET(req: Request) {
 
 function cacheHeaders(seconds = 60) {
   return {
-    "Cache-Control": `public, s-maxage=${seconds}, stale-while-revalidate=300`,
+    "Cache-Control": `public, s-maxage=${seconds}, stale-while-revalidate=120`,
   };
 }
