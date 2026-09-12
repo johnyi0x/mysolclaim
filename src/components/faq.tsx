@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { FAQ_ITEMS } from "@/lib/faq-data";
+import { useFeeConfig } from "@/components/fee-config-provider";
+import { getFaqItems } from "@/lib/faq-data";
 
 export function Faq({ limit }: { limit?: number }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
-  const items = limit ? FAQ_ITEMS.slice(0, limit) : FAQ_ITEMS;
+  const feeConfig = useFeeConfig();
+  const all = getFaqItems(feeConfig);
+  const items = limit ? all.slice(0, limit) : all;
 
   return (
     <div className="mx-auto max-w-3xl divide-y-[3px] divide-[var(--panel-border)] pixel-panel">

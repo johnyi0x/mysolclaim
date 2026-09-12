@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
-import {
-  FEE_PERCENT,
-  FEE_WALLET_ADDRESS,
-  SOLSCAN_ACCOUNT,
-} from "@/lib/constants";
+import { SOLSCAN_ACCOUNT } from "@/lib/constants";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
 
 export const metadata: Metadata = {
   title: "Security & Verification — MySolClaim",
@@ -12,6 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default function SecurityPage() {
+  const { feePercent, feeWallet } = readFeeConfigFromEnv();
   return (
     <div className="mx-auto max-w-3xl px-4 py-16">
       <h1 className="font-pixel text-sm sm:text-base">
@@ -88,21 +86,21 @@ export default function SecurityPage() {
             THE FEE
           </h2>
           <p className="mt-3">
-            We keep <strong className="text-[var(--foreground)]">{FEE_PERCENT}%</strong>{" "}
+            We keep <strong className="text-[var(--foreground)]">{feePercent}%</strong>{" "}
             of reclaimed rent as a SystemProgram.transfer inside the same
             atomic transaction. Fee is capped so it can never exceed reclaimed
             rent. You never pay out of pocket.
           </p>
-          {FEE_WALLET_ADDRESS && (
+          {feeWallet && (
             <p className="mt-3">
               Fee wallet:{" "}
               <a
                 className="break-all font-mono text-base text-[var(--accent)] underline"
-                href={SOLSCAN_ACCOUNT(FEE_WALLET_ADDRESS)}
+                href={SOLSCAN_ACCOUNT(feeWallet)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                {FEE_WALLET_ADDRESS}
+                {feeWallet}
               </a>
             </p>
           )}

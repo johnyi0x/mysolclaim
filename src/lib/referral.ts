@@ -1,18 +1,19 @@
 import { PublicKey } from "@solana/web3.js";
 import {
-  FEE_PERCENT,
-  FEE_WALLET,
-  FEE_WALLET_ADDRESS,
-  REFERRAL_SHARE_PERCENT,
-} from "./constants";
+  getFeePercent,
+  getFeeWallet,
+  getFeeWalletAddress,
+  getReferralSharePercent,
+} from "./fee-config";
 
-export { REFERRAL_SHARE_PERCENT };
-
-/** Platform keeps this fraction of the service fee when a referral applies. */
+/** @deprecated Prefer getReferralSharePercent() for live values. */
+export const REFERRAL_SHARE_PERCENT = getReferralSharePercent();
 export const PLATFORM_SHARE_PERCENT = 100 - REFERRAL_SHARE_PERCENT;
 
+export { getReferralSharePercent };
+
 export const REF_STORAGE_KEY = "mysolclaim:ref";
-export const REF_BOUND_KEY = "mysolclaim:ref-bound"; // claimant already bound locally
+export const REF_BOUND_KEY = "mysolclaim:ref-bound";
 
 export function parseReferrerParam(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -21,7 +22,8 @@ export function parseReferrerParam(raw: string | null | undefined): string | nul
   try {
     const pk = new PublicKey(trimmed);
     const base58 = pk.toBase58();
-    if (FEE_WALLET_ADDRESS && base58 === FEE_WALLET_ADDRESS) return null;
+    const feeWallet = getFeeWalletAddress();
+    if (feeWallet && base58 === feeWallet) return null;
     return base58;
   } catch {
     return null;
@@ -31,7 +33,9 @@ export function parseReferrerParam(raw: string | null | undefined): string | nul
 export function referralLinkFor(wallet: string, origin?: string): string {
   const base =
     origin ||
-    (typeof window !== "undefined" ? window.location.origin : "https://mysolclaim.com");
+    (typeof window !== "undefined"
+      ? window.location.origin
+      : "https://mysolclaim.com");
   return `${base}/?ref=${wallet}`;
 }
 
@@ -39,19 +43,17 @@ export function splitServiceFee(
   totalFeeLamports: number,
   withReferrer: boolean
 ): { platformLamports: number; referrerLamports: number } {
-  if (!withReferrer || totalFeeLamports <= 0 || REFERRAL_SHARE_PERCENT <= 0) {
+  const share = getReferralSharePercent();
+  if (!withReferrer || totalFeeLamports <= 0 || share <= 0) {
     return { platformLamports: totalFeeLamports, referrerLamports: 0 };
   }
-  const referrerLamports = Math.floor(
-    (totalFeeLamports * REFERRAL_SHARE_PERCENT) / 100
-  );
+  const referrerLamports = Math.floor((totalFeeLamports * share) / 100);
   return {
     platformLamports: totalFeeLamports - referrerLamports,
     referrerLamports,
   };
 }
 
-/** Capture ?ref= into localStorage (first-write wins until cleared). */
 export function captureRefFromUrl(): string | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
@@ -86,17 +88,14 @@ export function clearStoredReferrer() {
   }
 }
 
-/**
- * Resolve which referrer (if any) should receive a cut for this claimant.
- * Never self-referral; never fee wallet.
- */
 export function resolveReferrerForClaim(claimant: PublicKey): PublicKey | null {
   const stored = getStoredReferrer();
   if (!stored) return null;
   try {
     const ref = new PublicKey(stored);
     if (ref.equals(claimant)) return null;
-    if (FEE_WALLET && ref.equals(FEE_WALLET)) return null;
+    const feePk = getFeeWallet();
+    if (feePk && ref.equals(feePk)) return null;
     return ref;
   } catch {
     return null;
@@ -112,13 +111,15 @@ export function feeSplitExample(reclaimedSol = 1): {
   referrerSol: number;
   userNetSol: number;
 } {
-  const totalFeeSol = (reclaimedSol * FEE_PERCENT) / 100;
-  const referrerSol = (totalFeeSol * REFERRAL_SHARE_PERCENT) / 100;
+  const feePercent = getFeePercent();
+  const referralSharePercent = getReferralSharePercent();
+  const totalFeeSol = (reclaimedSol * feePercent) / 100;
+  const referrerSol = (totalFeeSol * referralSharePercent) / 100;
   const platformSol = totalFeeSol - referrerSol;
   return {
-    feePercent: FEE_PERCENT,
-    referralSharePercent: REFERRAL_SHARE_PERCENT,
-    platformSharePercent: PLATFORM_SHARE_PERCENT,
+    feePercent,
+    referralSharePercent,
+    platformSharePercent: 100 - referralSharePercent,
     totalFeeSol,
     platformSol,
     referrerSol,

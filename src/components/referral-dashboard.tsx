@@ -2,17 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import {
-  FEE_PERCENT,
-  REFERRAL_SHARE_PERCENT,
-  SOLSCAN_TX,
-} from "@/lib/constants";
+import { useFeeConfig } from "@/components/fee-config-provider";
+import { SOLSCAN_TX } from "@/lib/constants";
 import { formatSol, timeAgo, truncateAddress } from "@/lib/format";
-import {
-  PLATFORM_SHARE_PERCENT,
-  feeSplitExample,
-  referralLinkFor,
-} from "@/lib/referral";
+import { feeSplitExample, referralLinkFor } from "@/lib/referral";
 
 interface EarningRow {
   signature: string;
@@ -25,6 +18,11 @@ interface EarningRow {
 export function ReferralDashboard() {
   const { publicKey } = useWallet();
   const { connection } = useConnection();
+  const {
+    feePercent: FEE_PERCENT,
+    referralSharePercent: REFERRAL_SHARE_PERCENT,
+  } = useFeeConfig();
+  const PLATFORM_SHARE_PERCENT = 100 - REFERRAL_SHARE_PERCENT;
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,9 +171,9 @@ export function ReferralDashboard() {
         <p className="mt-3 text-base text-[var(--muted)]">
           Example on 1 SOL reclaimed: user pays {example.totalFeeSol.toFixed(4)}{" "}
           SOL fee → you get ~{example.referrerSol.toFixed(4)} SOL, platform ~
-          {example.platformSol.toFixed(4)} SOL. Same{" "}
-          {PLATFORM_SHARE_PERCENT}:{REFERRAL_SHARE_PERCENT} fee split if the
-          site fee later changes to 5% or 20%.
+          {example.platformSol.toFixed(4)} SOL. The{" "}
+          {PLATFORM_SHARE_PERCENT}:{REFERRAL_SHARE_PERCENT} split of the service
+          fee stays the same if the site fee % changes later.
         </p>
       </div>
 

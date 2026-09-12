@@ -5,7 +5,8 @@ import {
   type Connection,
   type ParsedTransactionWithMeta,
 } from "@solana/web3.js";
-import { FEE_WALLET_ADDRESS, SOLSCAN_TX } from "@/lib/constants";
+import { SOLSCAN_TX } from "@/lib/constants";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
 import { classifyClaimAction } from "@/lib/ledger-parse";
 import {
   clientKey,
@@ -166,6 +167,8 @@ export async function GET(req: Request) {
       { status: 429, headers: rateLimitHeaders(walletLimited, WALLET_LIMIT) }
     );
   }
+
+  const { feeWallet: FEE_WALLET_ADDRESS } = readFeeConfigFromEnv();
 
   if (!FEE_WALLET_ADDRESS) {
     const empty: ReferralEarningsResponse = {

@@ -20,6 +20,7 @@ import {
   LEDGER_HISTORY_CAP,
   LEDGER_PARSE_LIMIT,
 } from "@/lib/constants";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
 import { PublicKey } from "@solana/web3.js";
 import { parseClaimFromTx } from "@/lib/ledger-parse";
 
@@ -74,9 +75,8 @@ export async function GET(req: Request) {
     );
   }
 
-  const feeWalletAddress = process.env.NEXT_PUBLIC_FEE_WALLET?.trim();
-  const forceSync =
-    new URL(req.url).searchParams.get("sync") === "1";
+  const { feeWallet: feeWalletAddress } = readFeeConfigFromEnv();
+  const forceSync = new URL(req.url).searchParams.get("sync") === "1";
 
   if (!feeWalletAddress) {
     return NextResponse.json(EMPTY, {

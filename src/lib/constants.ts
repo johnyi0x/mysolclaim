@@ -1,25 +1,29 @@
-import { PublicKey } from "@solana/web3.js";
-
-/** Public address of the fee wallet. Every claim tx sends the fee here. */
-export const FEE_WALLET_ADDRESS = process.env.NEXT_PUBLIC_FEE_WALLET ?? "";
-
-export const FEE_WALLET: PublicKey | null = (() => {
-  try {
-    return FEE_WALLET_ADDRESS ? new PublicKey(FEE_WALLET_ADDRESS) : null;
-  } catch {
-    return null;
-  }
-})();
+import {
+  getFeePercent,
+  getFeeWallet,
+  getFeeWalletAddress,
+  getReferralSharePercent,
+  readFeeConfigFromEnv,
+} from "./fee-config";
 
 /**
- * Percentage of reclaimed rent taken as the service fee (e.g. 10 = 10%).
- * Clamped to 0–50 so a bad env value can never take more than half.
+ * Fee settings — prefer server env `FEE_WALLET` / `FEE_PERCENT` (no NEXT_PUBLIC_).
+ * Browser hydrates via /api/fee-config.
+ * Legacy NEXT_PUBLIC_* still works until you rename vars in Vercel.
  */
-export const FEE_PERCENT = (() => {
-  const raw = Number(process.env.NEXT_PUBLIC_FEE_PERCENT ?? "10");
-  if (!Number.isFinite(raw)) return 10;
-  return Math.min(50, Math.max(0, Math.floor(raw)));
-})();
+export const FEE_WALLET_ADDRESS: string = getFeeWalletAddress();
+export const FEE_WALLET = getFeeWallet();
+export const FEE_PERCENT: number = getFeePercent();
+export const REFERRAL_SHARE_PERCENT: number = getReferralSharePercent();
+
+export {
+  getFeePercent,
+  getFeeWallet,
+  getFeeWalletAddress,
+  getReferralSharePercent,
+  computeFeeLamports,
+  readFeeConfigFromEnv,
+} from "./fee-config";
 
 /** Max CloseAccount instructions per transaction (size limit is ~1232 bytes). */
 export const CLOSES_PER_TX = 20;
@@ -48,14 +52,3 @@ export const SOLSCAN_ACCOUNT = (addr: string) =>
 
 /** Official X / Twitter account. */
 export const X_URL = "https://x.com/JohnYi0x";
-
-/**
- * Percent of the *service fee* paid to a referrer (rest stays with platform).
- * Example: FEE_PERCENT=10 and this=30 → user pays 10% fee; referrer gets 3% of
- * reclaimed SOL, platform keeps 7% (70/30 of the fee). Scales if FEE_PERCENT changes.
- */
-export const REFERRAL_SHARE_PERCENT = (() => {
-  const raw = Number(process.env.NEXT_PUBLIC_REFERRAL_SHARE_PERCENT ?? "30");
-  if (!Number.isFinite(raw)) return 30;
-  return Math.min(50, Math.max(0, Math.floor(raw)));
-})();

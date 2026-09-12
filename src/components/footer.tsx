@@ -1,10 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
-import { FEE_WALLET_ADDRESS, SOLSCAN_ACCOUNT, X_URL } from "@/lib/constants";
+import { SOLSCAN_ACCOUNT, X_URL } from "@/lib/constants";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
 import { truncateAddress } from "@/lib/format";
 import { XLinkButton } from "./x-link";
 
 export function Footer() {
+  const { feeWallet } = readFeeConfigFromEnv();
   return (
     <footer className="border-t-[3px] border-[var(--panel-border)] bg-[var(--panel)]">
       <div className="mx-auto max-w-6xl px-3 py-8 sm:px-4 sm:py-10">
@@ -81,14 +83,14 @@ export function Footer() {
                   </a>
                 </li>
                 <li>
-                  {FEE_WALLET_ADDRESS ? (
+                  {feeWallet ? (
                     <a
-                      href={SOLSCAN_ACCOUNT(FEE_WALLET_ADDRESS)}
+                      href={SOLSCAN_ACCOUNT(feeWallet)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="hover:text-[var(--accent)]"
                     >
-                      Fee wallet: {truncateAddress(FEE_WALLET_ADDRESS, 5)} ↗
+                      Fee wallet: {truncateAddress(feeWallet, 5)} ↗
                     </a>
                   ) : (
                     <span>Fee wallet: not configured</span>

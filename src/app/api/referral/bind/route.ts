@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { FEE_WALLET_ADDRESS } from "@/lib/constants";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
 import { parseReferrerParam } from "@/lib/referral";
 import {
   bindReferralOnce,
@@ -113,6 +113,8 @@ export async function POST(req: Request) {
       { headers: rateLimitHeaders(ipLimited, IP_LIMIT) }
     );
   }
+
+  const { feeWallet: FEE_WALLET_ADDRESS } = readFeeConfigFromEnv();
 
   if (FEE_WALLET_ADDRESS && proposed === FEE_WALLET_ADDRESS) {
     return NextResponse.json(

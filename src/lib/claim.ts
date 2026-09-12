@@ -6,7 +6,13 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { createCloseAccountInstruction } from "@solana/spl-token";
-import { CLOSES_PER_TX, FEE_PERCENT, FEE_WALLET } from "./constants";
+import { CLOSES_PER_TX } from "./constants";
+import {
+  computeFeeLamports,
+  getFeePercent,
+  getFeeWalletAddress,
+  parseFeeWallet,
+} from "./fee-config";
 import {
   buildAmmWsolInstructions,
   buildBondingSolInstructions,
@@ -56,12 +62,40 @@ export function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export function computeFee(rentLamports: number): number {
-  return Math.floor((rentLamports * FEE_PERCENT) / 100);
+  return computeFeeLamports(rentLamports);
+}
+
+function requireFeeWallet(): PublicKey {
+  const raw = getFeeWalletAddress().trim();
+  const pk = parseFeeWallet(raw);
+  if (!pk) {
+    throw new Error(
+      "Fee wallet is not configured (set FEE_WALLET in Vercel). Refusing to build claim transactions."
+    );
+  }
+  return pk;
+}
+
+/** True if tx already includes a SystemProgram.transfer to the platform fee wallet. */
+export function txHasPlatformFeeTransfer(
+  tx: Transaction,
+  feeWallet: PublicKey
+): boolean {
+  const feeStr = feeWallet.toBase58();
+  return tx.instructions.some((ix) => {
+    if (!ix.programId.equals(SystemProgram.programId)) return false;
+    const to = ix.keys[1]?.pubkey;
+    return (
+      Boolean(to && to.equals(feeWallet)) ||
+      Boolean(to && to.toBase58() === feeStr)
+    );
+  });
 }
 
 /**
  * Append platform (+ optional referrer) fee transfers.
- * Referral cut comes from the service fee — referred user does not pay extra.
+ * MUST run after reclaim instructions so the user has lamports to pay with.
+ * Never silently skips when a fee is due.
  */
 async function appendFeeTransfer(
   connection: Connection,
@@ -74,11 +108,20 @@ async function appendFeeTransfer(
   platformFee: number;
   referrerFee: number;
 }> {
-  if (!FEE_WALLET || FEE_PERCENT <= 0 || reclaimableLamports <= 0) {
+  const feePercent = getFeePercent();
+  if (feePercent <= 0 || reclaimableLamports <= 0) {
     return { totalFee: 0, platformFee: 0, referrerFee: 0 };
   }
 
-  let feeLamports = computeFee(reclaimableLamports);
+  const feeWallet = requireFeeWallet();
+
+  let feeLamports = computeFeeLamports(reclaimableLamports, feePercent);
+  if (feeLamports <= 0 && reclaimableLamports >= 100) {
+    feeLamports = Math.max(1, Math.floor(reclaimableLamports / 1000));
+  }
+  if (feeLamports <= 0) {
+    return { totalFee: 0, platformFee: 0, referrerFee: 0 };
+  }
 
   let rent0 = 890_880;
   try {
@@ -89,7 +132,7 @@ async function appendFeeTransfer(
 
   let feeWalletReady = true;
   try {
-    const feeInfo = await connection.getAccountInfo(FEE_WALLET, "confirmed");
+    const feeInfo = await connection.getAccountInfo(feeWallet, "confirmed");
     if (!feeInfo) {
       feeWalletReady = false;
       feeLamports = Math.max(feeLamports, rent0);
@@ -109,12 +152,23 @@ async function appendFeeTransfer(
     );
   }
 
+  if (safeFee <= 0) {
+    throw new Error(
+      "Platform fee calculated to 0 while FEE_PERCENT > 0. Refusing to build claim without fee."
+    );
+  }
+
   const useReferrer = Boolean(referrer && feeWalletReady);
 
   let { platformLamports, referrerLamports } = splitServiceFee(
     safeFee,
     useReferrer
   );
+
+  if (platformLamports <= 0 && safeFee > 0) {
+    platformLamports = safeFee;
+    referrerLamports = 0;
+  }
 
   if (referrer && referrerLamports > 0) {
     try {
@@ -138,7 +192,7 @@ async function appendFeeTransfer(
     tx.add(
       SystemProgram.transfer({
         fromPubkey: user,
-        toPubkey: FEE_WALLET,
+        toPubkey: feeWallet,
         lamports: platformLamports,
       })
     );
@@ -154,11 +208,23 @@ async function appendFeeTransfer(
     );
   }
 
+  if (!txHasPlatformFeeTransfer(tx, feeWallet)) {
+    throw new Error(
+      "Internal error: platform fee transfer missing from transaction. Claim aborted."
+    );
+  }
+
   return {
     totalFee: platformLamports + referrerLamports,
     platformFee: platformLamports,
     referrerFee: referrerLamports,
   };
+}
+
+function assertFeeConfigured() {
+  if (getFeePercent() > 0) {
+    requireFeeWallet();
+  }
 }
 
 export async function buildBondingSolTransaction(
@@ -167,11 +233,7 @@ export async function buildBondingSolTransaction(
   opportunity: PumpBondingSolOpportunity,
   referrer: PublicKey | null = null
 ): Promise<ClaimBatch> {
-  if (!FEE_WALLET && FEE_PERCENT > 0) {
-    throw new Error(
-      "Fee wallet is not configured. Refusing to build claim transactions."
-    );
-  }
+  assertFeeConfigured();
 
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
@@ -222,11 +284,7 @@ export async function buildAmmWsolTransaction(
   opportunity: PumpTokenCashbackOpportunity,
   referrer: PublicKey | null = null
 ): Promise<ClaimBatch> {
-  if (!FEE_WALLET && FEE_PERCENT > 0) {
-    throw new Error(
-      "Fee wallet is not configured. Refusing to build claim transactions."
-    );
-  }
+  assertFeeConfigured();
 
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
@@ -277,11 +335,8 @@ export async function buildUsdcCashbackTransaction(
   opportunity: PumpTokenCashbackOpportunity,
   referrer: PublicKey | null = null
 ): Promise<ClaimBatch> {
-  if (!FEE_WALLET && FEE_PERCENT > 0) {
-    throw new Error(
-      "Fee wallet is not configured. Refusing to build claim transactions."
-    );
-  }
+  assertFeeConfigured();
+  const feeWallet = requireFeeWallet();
 
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
@@ -301,15 +356,17 @@ export async function buildUsdcCashbackTransaction(
     tx.add(ix);
   }
 
-  const totalFee = Math.floor((opportunity.amount * FEE_PERCENT) / 100);
+  const totalFee = Math.floor(
+    (opportunity.amount * getFeePercent()) / 100
+  );
   const { platformLamports: platformFeeRaw, referrerLamports: referrerFeeRaw } =
-    splitServiceFee(totalFee, Boolean(referrer && FEE_WALLET));
+    splitServiceFee(totalFee, Boolean(referrer));
 
-  if (FEE_WALLET && (platformFeeRaw > 0 || referrerFeeRaw > 0)) {
+  if (platformFeeRaw > 0 || referrerFeeRaw > 0) {
     for (const ix of buildUsdcFeeTransfers(
       user,
       opportunity.amount,
-      FEE_WALLET,
+      feeWallet,
       platformFeeRaw,
       referrer,
       referrerFeeRaw
@@ -319,7 +376,8 @@ export async function buildUsdcCashbackTransaction(
   }
 
   // Small SOL tip so fee-wallet ledger / Neon stats still see the claim.
-  const solTipBase = 1_000_000; // 0.001 SOL notional → 10% fee = 0.0001 SOL
+  // Tip notional scales with FEE_PERCENT (fee = notional * percent / 100).
+  const solTipBase = 1_000_000; // 0.001 SOL notional
   const solFees = await appendFeeTransfer(
     connection,
     tx,
@@ -360,11 +418,7 @@ export async function buildClaimTransactions(
   selected: EmptyTokenAccount[],
   referrer: PublicKey | null = null
 ): Promise<ClaimBatch[]> {
-  if (!FEE_WALLET && FEE_PERCENT > 0) {
-    throw new Error(
-      "Fee wallet is not configured. Refusing to build claim transactions."
-    );
-  }
+  assertFeeConfigured();
 
   const closable = selected.filter((a) => a.closable);
   const batches = chunk(closable, CLOSES_PER_TX);
@@ -439,11 +493,7 @@ export async function buildExcessRentTransactions(
   selected: ExcessRentAccount[],
   referrer: PublicKey | null = null
 ): Promise<ClaimBatch[]> {
-  if (!FEE_WALLET && FEE_PERCENT > 0) {
-    throw new Error(
-      "Fee wallet is not configured. Refusing to build claim transactions."
-    );
-  }
+  assertFeeConfigured();
 
   const batches = chunk(selected, EXCESS_PER_TX);
   const results: ClaimBatch[] = [];

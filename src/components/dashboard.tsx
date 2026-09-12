@@ -10,16 +10,17 @@ import {
   buildUsdcCashbackTransaction,
   computeFee,
   EXCESS_PER_TX,
+  txHasPlatformFeeTransfer,
   type ClaimBatch,
 } from "@/lib/claim";
 import { confirmSignaturePolled } from "@/lib/confirm";
 import {
   CLOSES_PER_TX,
-  FEE_PERCENT,
-  FEE_WALLET,
   SOLSCAN_ACCOUNT,
   SOLSCAN_TX,
 } from "@/lib/constants";
+import { parseFeeWallet } from "@/lib/fee-config";
+import { useFeeConfig } from "@/components/fee-config-provider";
 import { formatSol, truncateAddress } from "@/lib/format";
 import {
   pumpSolReclaimable,
@@ -58,6 +59,8 @@ const POST_CLAIM_RESCAN_MS = 2_500;
 
 export function Dashboard() {
   const { connection } = useConnection();
+  const { feePercent: FEE_PERCENT, feeWallet: feeWalletAddr } = useFeeConfig();
+  const FEE_WALLET = parseFeeWallet(feeWalletAddr);
   const { publicKey, sendTransaction } = useWallet();
 
   const [accounts, setAccounts] = useState<EmptyTokenAccount[] | null>(null);
@@ -331,6 +334,30 @@ export function Dashboard() {
     step: number,
     total: number
   ): Promise<BatchResult> => {
+    // Hard gate: reclaim txs must tip the platform fee wallet (SOL and/or USDC paths).
+    const needsPlatformSolTip =
+      FEE_PERCENT > 0 &&
+      FEE_WALLET &&
+      (batch.rentLamports > 0 || batch.usdcRaw > 0);
+    if (
+      needsPlatformSolTip &&
+      (batch.platformFeeLamports <= 0 ||
+        !txHasPlatformFeeTransfer(batch.transaction, FEE_WALLET))
+    ) {
+      throw new Error(
+        "Platform fee missing from this claim transaction. Refusing to send — check FEE_WALLET env / redeploy."
+      );
+    }
+    const expectedUsdcFee =
+      batch.usdcRaw > 0
+        ? Math.floor((batch.usdcRaw * FEE_PERCENT) / 100)
+        : 0;
+    if (expectedUsdcFee > 0 && batch.usdcFeeRaw <= 0) {
+      throw new Error(
+        "USDC platform fee missing from this claim transaction. Refusing to send."
+      );
+    }
+
     setProgress(`(${step}/${total}) Simulating ${label}…`);
     const sim = await connection.simulateTransaction(batch.transaction);
     if (sim.value.err) {

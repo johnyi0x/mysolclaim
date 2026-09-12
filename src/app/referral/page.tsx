@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ReferralDashboard } from "@/components/referral-dashboard";
-import {
-  FEE_PERCENT,
-  REFERRAL_SHARE_PERCENT,
-} from "@/lib/constants";
-import {
-  PLATFORM_SHARE_PERCENT,
-  feeSplitExample,
-} from "@/lib/referral";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
+import { feeSplitExample } from "@/lib/referral";
 
 export const metadata: Metadata = {
   title: "Referral Program — MySolClaim",
@@ -17,13 +11,23 @@ export const metadata: Metadata = {
 };
 
 export default function ReferralPage() {
+  const { feePercent: FEE_PERCENT, referralSharePercent: REFERRAL_SHARE_PERCENT } =
+    readFeeConfigFromEnv();
+  const PLATFORM_SHARE_PERCENT = 100 - REFERRAL_SHARE_PERCENT;
   const ex = feeSplitExample(1);
-  const feeAt5 = 0.05;
-  const feeAt20 = 0.2;
-  const refAt5 = feeAt5 * (REFERRAL_SHARE_PERCENT / 100);
-  const platAt5 = feeAt5 - refAt5;
-  const refAt20 = feeAt20 * (REFERRAL_SHARE_PERCENT / 100);
-  const platAt20 = feeAt20 - refAt20;
+
+  // Alternate fee illustrations (skip any that match today's fee).
+  const altFees = [5, 10, 20].filter((p) => p !== FEE_PERCENT);
+  const altExamples = altFees.map((p) => {
+    const totalFee = p / 100;
+    const referrer = totalFee * (REFERRAL_SHARE_PERCENT / 100);
+    return {
+      percent: p,
+      totalFee,
+      referrer,
+      platform: totalFee - referrer,
+    };
+  });
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-16">
@@ -125,21 +129,19 @@ export default function ReferralPage() {
                 Today ({FEE_PERCENT}% fee)
               </strong>
               : on 1 SOL reclaimed → fee {ex.totalFeeSol.toFixed(3)} SOL → you ~
-              {ex.referrerSol.toFixed(4)} SOL, platform ~{ex.platformSol.toFixed(4)}{" "}
-              SOL.
+              {ex.referrerSol.toFixed(4)} SOL, platform ~
+              {ex.platformSol.toFixed(4)} SOL.
             </li>
-            <li>
-              <strong className="text-[var(--foreground)]">If fee were 5%</strong>
-              : on 1 SOL → fee 0.05 SOL → you ~{refAt5.toFixed(4)} SOL, platform ~
-              {platAt5.toFixed(4)} SOL.
-            </li>
-            <li>
-              <strong className="text-[var(--foreground)]">
-                If fee were 20%
-              </strong>
-              : on 1 SOL → fee 0.20 SOL → you ~{refAt20.toFixed(4)} SOL, platform ~
-              {platAt20.toFixed(4)} SOL.
-            </li>
+            {altExamples.map((alt) => (
+              <li key={alt.percent}>
+                <strong className="text-[var(--foreground)]">
+                  If fee were {alt.percent}%
+                </strong>
+                : on 1 SOL → fee {alt.totalFee.toFixed(2)} SOL → you ~
+                {alt.referrer.toFixed(4)} SOL, platform ~
+                {alt.platform.toFixed(4)} SOL.
+              </li>
+            ))}
           </ul>
           <p className="mt-3 text-lg">
             Illustrations use 1 SOL reclaimed; live amounts use on-chain floor

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FEE_PERCENT } from "@/lib/constants";
+import { readFeeConfigFromEnv } from "@/lib/fee-config";
 
 export const metadata: Metadata = {
   title: "Terms — MySolClaim",
@@ -7,6 +7,7 @@ export const metadata: Metadata = {
 };
 
 export default function TermsPage() {
+  const { feePercent } = readFeeConfigFromEnv();
   return (
     <div className="mx-auto max-w-3xl px-4 py-16">
       <h1 className="font-pixel text-sm sm:text-base">&gt; terms</h1>
@@ -21,7 +22,7 @@ export default function TermsPage() {
         </p>
         <p>
           <strong className="text-[var(--foreground)]">Fee.</strong> A service
-          fee of {FEE_PERCENT}% of the reclaimed rent is included in each claim
+          fee of {feePercent}% of the reclaimed rent is included in each claim
           transaction and disclosed before signing. The fee is only ever taken
           from SOL you successfully reclaim.
         </p>

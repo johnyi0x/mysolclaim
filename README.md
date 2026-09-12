@@ -10,14 +10,20 @@ Next.js (App Router) · TypeScript · Tailwind CSS v3 · `@solana/web3.js` ·
 
 ## Environment variables (Vercel)
 
+Use normal **Config** vars (no `NEXT_PUBLIC_` prefix). The browser loads fee
+settings from `GET /api/fee-config`.
+
 | Name | Required? | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_FEE_WALLET` | yes | Fee wallet public address |
-| `NEXT_PUBLIC_FEE_PERCENT` | no (default 10) | Fee % |
-| `NEXT_PUBLIC_REFERRAL_SHARE_PERCENT` | no (default 30) | Referrer cut of the service fee |
-| `NEON_CONNECTION_STRING` | yes for accurate stats | Neon Postgres URL (server-only) — durable all-time + 24h stats |
-| `HELIUS_RPC_URL` | optional fallback | Private RPC URL+key (server-only; used only if public fails) |
+| `FEE_WALLET` | yes | Fee wallet public address (receive-only) |
+| `FEE_PERCENT` | no (default 5) | Fee % of reclaimed SOL |
+| `REFERRAL_SHARE_PERCENT` | no (default 30) | Referrer cut of the service fee |
+| `NEON_CONNECTION_STRING` | yes for accurate stats | Neon Postgres URL (server-only) |
+| `HELIUS_RPC_URL` | optional fallback | Private RPC URL+key (server-only) |
 | `UPSTASH_REDIS_REST_URL` / `TOKEN` | optional | Durable referral bind across devices |
+
+Legacy `NEXT_PUBLIC_FEE_*` names still work until you rename them.
+If `FEE_WALLET` is missing, the app falls back to the known public fee address.
 
 **RPC order:** public Solana RPC first → `HELIUS_RPC_URL` only if public fails.
 JSON-RPC **batches are never sent** (free Helius compatible).
