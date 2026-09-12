@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   buildClaimTransactions,
+  buildExcessRentTransactions,
   buildPumpCashbackTransaction,
   computeFee,
+  EXCESS_PER_TX,
   type ClaimBatch,
 } from "@/lib/claim";
 import { confirmSignaturePolled } from "@/lib/confirm";
@@ -20,16 +22,17 @@ import { formatSol, truncateAddress } from "@/lib/format";
 import type { PumpCashbackOpportunity } from "@/lib/pump-cashback";
 import { getStoredReferrer } from "@/lib/referral";
 import { fetchEffectiveReferrer } from "@/lib/resolve-referrer";
-import type { EmptyTokenAccount } from "@/lib/scan";
+import type { EmptyTokenAccount, ExcessRentAccount } from "@/lib/scan";
 import { notifyClaimsUpdated } from "@/lib/use-ledger";
 
 interface BatchResult {
   signature: string;
   accountsClosed: number;
   closedAddresses: string[];
+  excessAddresses: string[];
   rentLamports: number;
   feeLamports: number;
-  action: "vacant_account" | "pump_cashback";
+  action: "vacant_account" | "excess_rent" | "pump_cashback";
 }
 
 type Phase = "idle" | "claiming" | "done";
@@ -43,12 +46,16 @@ export function Dashboard() {
   const { publicKey, sendTransaction } = useWallet();
 
   const [accounts, setAccounts] = useState<EmptyTokenAccount[] | null>(null);
+  const [excessAccounts, setExcessAccounts] = useState<ExcessRentAccount[]>(
+    []
+  );
   const [pumpCashback, setPumpCashback] =
     useState<PumpCashbackOpportunity | null>(null);
   const [includePump, setIncludePump] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedExcess, setSelectedExcess] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<string | null>(null);
   const [results, setResults] = useState<BatchResult[]>([]);
@@ -59,23 +66,39 @@ export function Dashboard() {
   const postClaimRescanRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Addresses confirmed closed this session — filter every scan result through this. */
   const confirmedClosedRef = useRef<Set<string>>(new Set());
+  /** Excess-rent addresses already withdrawn this session. */
+  const confirmedExcessRef = useRef<Set<string>>(new Set());
   /** Whether pump cashback was confirmed claimed this session. */
   const confirmedPumpRef = useRef(false);
 
   const clearClaimedFromUi = useCallback((completed: BatchResult[]) => {
     const closed = new Set(completed.flatMap((r) => r.closedAddresses));
+    const excessDone = new Set(completed.flatMap((r) => r.excessAddresses));
     const claimedPump = completed.some((r) => r.action === "pump_cashback");
 
     for (const addr of closed) confirmedClosedRef.current.add(addr);
+    for (const addr of excessDone) confirmedExcessRef.current.add(addr);
     if (claimedPump) confirmedPumpRef.current = true;
 
     if (closed.size > 0) {
       setAccounts((prev) =>
-        prev ? prev.filter((a) => !confirmedClosedRef.current.has(a.address)) : prev
+        prev
+          ? prev.filter((a) => !confirmedClosedRef.current.has(a.address))
+          : prev
       );
       setSelected((prev) => {
         const next = new Set(prev);
         for (const addr of closed) next.delete(addr);
+        return next;
+      });
+    }
+    if (excessDone.size > 0) {
+      setExcessAccounts((prev) =>
+        prev.filter((a) => !confirmedExcessRef.current.has(a.address))
+      );
+      setSelectedExcess((prev) => {
+        const next = new Set(prev);
+        for (const addr of excessDone) next.delete(addr);
         return next;
       });
     }
@@ -117,18 +140,23 @@ export function Dashboard() {
         setScanError(data.error || "Scan failed. Please try again.");
         return;
       }
-      const rawFound = (data.accounts ?? []) as EmptyTokenAccount[];
+      const found = (data.accounts ?? []) as EmptyTokenAccount[];
+      const foundExcess = ((data.excess ?? []) as ExcessRentAccount[]).filter(
+        (a) => !confirmedExcessRef.current.has(a.address)
+      );
       const pump = (data.pumpCashback ?? null) as PumpCashbackOpportunity | null;
       // Always exclude confirmed-closed accounts regardless of RPC lag.
-      const found = rawFound.filter(
+      const vacant = found.filter(
         (a) => !confirmedClosedRef.current.has(a.address)
       );
-      setAccounts(found);
+      setAccounts(vacant);
+      setExcessAccounts(foundExcess);
       setPumpCashback(confirmedPumpRef.current ? null : pump);
       setIncludePump(confirmedPumpRef.current ? false : Boolean(pump));
       setSelected(
-        new Set(found.filter((a) => a.closable).map((a) => a.address))
+        new Set(vacant.filter((a) => a.closable).map((a) => a.address))
       );
+      setSelectedExcess(new Set(foundExcess.map((a) => a.address)));
       lastScanAt.current = Date.now();
       setCooldownUntil(Date.now() + SCAN_COOLDOWN_MS);
     } catch (err) {
@@ -154,12 +182,14 @@ export function Dashboard() {
 
   useEffect(() => {
     setAccounts(null);
+    setExcessAccounts([]);
     setPumpCashback(null);
     setResults([]);
     setPhase("idle");
     setClaimError(null);
     lastScanAt.current = 0;
     confirmedClosedRef.current = new Set();
+    confirmedExcessRef.current = new Set();
     confirmedPumpRef.current = false;
     if (postClaimRescanRef.current) {
       clearTimeout(postClaimRescanRef.current);
@@ -183,18 +213,33 @@ export function Dashboard() {
     () => closable.filter((a) => selected.has(a.address)),
     [closable, selected]
   );
+  const selectedExcessList = useMemo(
+    () => excessAccounts.filter((a) => selectedExcess.has(a.address)),
+    [excessAccounts, selectedExcess]
+  );
   const selectedRent = selectedAccounts.reduce((n, a) => n + a.lamports, 0);
+  const selectedExcessLamports = selectedExcessList.reduce(
+    (n, a) => n + a.excessLamports,
+    0
+  );
   const pumpLamports =
     includePump && pumpCashback ? pumpCashback.lamports : 0;
-  const totalReclaimable = selectedRent + pumpLamports;
+  const totalReclaimable =
+    selectedRent + selectedExcessLamports + pumpLamports;
   const fee = FEE_WALLET ? computeFee(totalReclaimable) : 0;
   const netReceive = totalReclaimable - fee;
   const vacantTxCount =
     Math.ceil(selectedAccounts.length / CLOSES_PER_TX) || 0;
+  const excessTxCount =
+    Math.ceil(selectedExcessList.length / EXCESS_PER_TX) || 0;
   const pumpTxCount = pumpLamports > 0 ? 1 : 0;
-  const txCount = vacantTxCount + pumpTxCount;
+  const txCount = vacantTxCount + excessTxCount + pumpTxCount;
   const onCooldown = Date.now() < cooldownUntil;
-  const canClaim = totalReclaimable > 0 && (selectedAccounts.length > 0 || pumpLamports > 0);
+  const canClaim =
+    totalReclaimable > 0 &&
+    (selectedAccounts.length > 0 ||
+      selectedExcessList.length > 0 ||
+      pumpLamports > 0);
 
   const toggle = (address: string) => {
     setSelected((prev) => {
@@ -210,6 +255,23 @@ export function Dashboard() {
       prev.size === closable.length
         ? new Set()
         : new Set(closable.map((a) => a.address))
+    );
+  };
+
+  const toggleExcess = (address: string) => {
+    setSelectedExcess((prev) => {
+      const next = new Set(prev);
+      if (next.has(address)) next.delete(address);
+      else next.add(address);
+      return next;
+    });
+  };
+
+  const toggleAllExcess = () => {
+    setSelectedExcess((prev) =>
+      prev.size === excessAccounts.length
+        ? new Set()
+        : new Set(excessAccounts.map((a) => a.address))
     );
   };
 
@@ -252,6 +314,7 @@ export function Dashboard() {
       signature,
       accountsClosed: batch.accounts.length,
       closedAddresses: batch.accounts.map((a) => a.address),
+      excessAddresses: batch.excessAccounts.map((a) => a.address),
       rentLamports: batch.rentLamports,
       feeLamports: batch.feeLamports,
       action: batch.action,
@@ -308,6 +371,21 @@ export function Dashboard() {
           step,
           total
         );
+        completed.push(result);
+        setResults([...completed]);
+      }
+
+      for (let i = 0; i < selectedExcessList.length; i += EXCESS_PER_TX) {
+        const slice = selectedExcessList.slice(i, i + EXCESS_PER_TX);
+        step++;
+        setProgress(`(${step}/${total}) Building excess-rent claim…`);
+        const [batch] = await buildExcessRentTransactions(
+          connection,
+          publicKey,
+          slice,
+          referrer
+        );
+        const result = await sendBatch(batch, "excess rent", step, total);
         completed.push(result);
         setResults([...completed]);
       }
@@ -392,7 +470,9 @@ export function Dashboard() {
                   —{" "}
                   {r.action === "pump_cashback"
                     ? "Pump.fun cashback"
-                    : `${r.accountsClosed} vacant`}
+                    : r.action === "excess_rent"
+                      ? `${r.excessAddresses.length} excess rent`
+                      : `${r.accountsClosed} vacant`}
                   , +{formatSol(r.rentLamports - r.feeLamports)} SOL
                 </span>
               </li>
@@ -508,6 +588,125 @@ export function Dashboard() {
               </a>
             </div>
           </label>
+        </div>
+      )}
+
+      {/* Excess rent after SIMD-0437 rent reduction */}
+      {excessAccounts.length > 0 && (
+        <div className="mt-4">
+          <h2 className="mb-3 font-pixel text-[9px] sm:text-[10px]">
+            Excess Rent ({excessAccounts.length})
+          </h2>
+          <p className="mb-3 text-base text-[var(--muted)] sm:text-lg">
+            Solana lowered the rent floor — withdraw surplus SOL without closing
+            these accounts (tokens stay). Same {FEE_PERCENT}% fee applies.
+          </p>
+          <div className="space-y-3 md:hidden">
+            <label className="flex min-h-11 items-center gap-3 pixel-panel px-4 py-3">
+              <input
+                type="checkbox"
+                checked={
+                  excessAccounts.length > 0 &&
+                  selectedExcess.size === excessAccounts.length
+                }
+                onChange={toggleAllExcess}
+                className="h-5 w-5 accent-[var(--accent)]"
+              />
+              <span className="font-pixel text-[9px]">SELECT ALL</span>
+            </label>
+            {excessAccounts.map((acc) => (
+              <label key={acc.address} className="block pixel-panel p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedExcess.has(acc.address)}
+                    onChange={() => toggleExcess(acc.address)}
+                    className="mt-1 h-5 w-5 shrink-0 accent-[var(--accent)]"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-pixel text-[10px] text-[var(--accent)]">
+                        +{formatSol(acc.excessLamports)} SOL
+                      </span>
+                      {acc.isToken2022 ? (
+                        <span className="border border-[var(--accent-2)] px-2 py-0.5 text-sm text-[var(--accent-2)]">
+                          T22
+                        </span>
+                      ) : (
+                        <span className="text-sm text-[var(--muted)]">SPL</span>
+                      )}
+                    </div>
+                    <p className="mt-2 break-all font-mono text-sm text-[var(--muted)]">
+                      mint {truncateAddress(acc.mint, 6)}
+                    </p>
+                    <p className="mt-1 break-all font-mono text-sm text-[var(--muted)]">
+                      acct {truncateAddress(acc.address, 6)}
+                    </p>
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[640px] border-collapse text-left text-lg">
+              <thead>
+                <tr className="border-b-[3px] border-[var(--panel-border)] text-[var(--muted)]">
+                  <th className="p-3">
+                    <input
+                      type="checkbox"
+                      checked={
+                        excessAccounts.length > 0 &&
+                        selectedExcess.size === excessAccounts.length
+                      }
+                      onChange={toggleAllExcess}
+                      className="h-4 w-4 accent-[var(--accent)]"
+                    />
+                  </th>
+                  <th className="p-3 font-pixel text-[9px]">MINT</th>
+                  <th className="p-3 font-pixel text-[9px]">ACCOUNT</th>
+                  <th className="p-3 font-pixel text-[9px]">TYPE</th>
+                  <th className="p-3 font-pixel text-[9px]">EXCESS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {excessAccounts.map((acc) => (
+                  <tr
+                    key={acc.address}
+                    className="border-b border-[var(--panel-border)]"
+                  >
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedExcess.has(acc.address)}
+                        onChange={() => toggleExcess(acc.address)}
+                        className="h-4 w-4 accent-[var(--accent)]"
+                      />
+                    </td>
+                    <td className="p-3 font-mono text-base">
+                      {truncateAddress(acc.mint, 6)}
+                    </td>
+                    <td className="p-3 font-mono text-base">
+                      <a
+                        href={SOLSCAN_ACCOUNT(acc.address)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--accent)] hover:underline"
+                      >
+                        {truncateAddress(acc.address, 6)}
+                      </a>
+                    </td>
+                    <td className="p-3 text-base text-[var(--muted)]">
+                      {acc.isToken2022 ? "T22" : "SPL"}
+                    </td>
+                    <td className="p-3 font-pixel text-[10px] text-[var(--accent)]">
+                      {formatSol(acc.excessLamports)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

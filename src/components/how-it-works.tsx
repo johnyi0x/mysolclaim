@@ -7,12 +7,12 @@ const STEPS = [
   {
     n: "02",
     title: "SCAN",
-    text: "We find empty token accounts plus any Pump.fun cashback / volume rent you can reclaim. Free, read-only, nothing is signed.",
+    text: "We find empty token accounts, excess rent after Solana's rent cut, plus any Pump.fun cashback you can reclaim. Free, read-only, nothing is signed.",
   },
   {
     n: "03",
     title: "REVIEW",
-    text: "See vacant accounts and Pump.fun cashback separately. Select what to claim — exact SOL and fee shown before anything happens.",
+    text: "See vacant closes, excess-rent withdraws, and Pump cashback separately. Exact SOL and fee shown before anything happens.",
   },
   {
     n: "04",

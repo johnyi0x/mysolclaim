@@ -13,6 +13,8 @@ function actionLabel(action: ClaimActionType): string {
   switch (action) {
     case "pump_cashback":
       return "Pump.fun Cashback";
+    case "excess_rent":
+      return "Excess Rent";
     case "burn_token":
       return "Burn Token";
     case "mixed":

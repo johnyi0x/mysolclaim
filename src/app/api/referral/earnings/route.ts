@@ -6,7 +6,7 @@ import {
   type ParsedTransactionWithMeta,
 } from "@solana/web3.js";
 import { FEE_WALLET_ADDRESS, SOLSCAN_TX } from "@/lib/constants";
-import { PUMP_PROGRAM_ID } from "@/lib/pump-cashback";
+import { classifyClaimAction } from "@/lib/ledger-parse";
 import {
   clientKey,
   isAllowedOrigin,
@@ -56,30 +56,7 @@ function programIdOf(ix: { programId?: unknown; program?: unknown }): string | n
 }
 
 function isClaimLikeTx(tx: ParsedTransactionWithMeta): boolean {
-  let accountsClosed = 0;
-  let hasPump = false;
-  const pumpId = PUMP_PROGRAM_ID.toBase58();
-
-  const consider = (ix: {
-    programId?: unknown;
-    program?: unknown;
-    parsed?: { type?: string };
-  }) => {
-    if (ix.parsed?.type === "closeAccount") accountsClosed++;
-    const pid = programIdOf(ix);
-    if (pid === pumpId) hasPump = true;
-  };
-
-  for (const ix of tx.transaction.message.instructions) {
-    consider(ix as { programId?: unknown; parsed?: { type?: string } });
-  }
-  for (const group of tx.meta?.innerInstructions ?? []) {
-    for (const ix of group.instructions) {
-      consider(ix as { programId?: unknown; parsed?: { type?: string } });
-    }
-  }
-
-  return accountsClosed > 0 || hasPump;
+  return classifyClaimAction(tx).action !== null;
 }
 
 /** Lamports credited to `wallet` via system transfers in this tx. */

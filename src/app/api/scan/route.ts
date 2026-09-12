@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { findEmptyTokenAccounts } from "@/lib/scan";
+import { findTokenReclaimOpportunities } from "@/lib/scan";
 import { findPumpCashback } from "@/lib/pump-cashback";
 import {
   clientKey,
@@ -17,8 +17,8 @@ const LIMIT = 8;
 const WINDOW_MS = 60_000;
 
 /**
- * Rate-limited empty-account + Pump.fun cashback scan.
- * Tries public Solana RPC first, then HELIUS_RPC_URL if configured.
+ * Rate-limited reclaim scan: vacant closes + excess rent + Pump cashback.
+ * Public Solana RPC first, then HELIUS_RPC_URL if configured.
  */
 export async function GET(req: Request) {
   if (!isAllowedOrigin(req)) {
@@ -53,7 +53,11 @@ export async function GET(req: Request) {
     );
   }
 
-  const walletLimited = rateLimit(`scan-wallet:${owner.toBase58()}`, 6, WINDOW_MS);
+  const walletLimited = rateLimit(
+    `scan-wallet:${owner.toBase58()}`,
+    6,
+    WINDOW_MS
+  );
   if (!walletLimited.ok) {
     return NextResponse.json(
       {
@@ -68,15 +72,21 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { accounts, pumpCashback } = await withRpcFallback(async (connection) => {
-      const [accounts, pumpCashback] = await Promise.all([
-        findEmptyTokenAccounts(connection, owner),
-        findPumpCashback(connection, owner),
-      ]);
-      return { accounts, pumpCashback };
-    });
+    const { accounts, excess, pumpCashback } = await withRpcFallback(
+      async (connection) => {
+        const [tokenScan, pumpCashback] = await Promise.all([
+          findTokenReclaimOpportunities(connection, owner),
+          findPumpCashback(connection, owner),
+        ]);
+        return {
+          accounts: tokenScan.accounts,
+          excess: tokenScan.excess,
+          pumpCashback,
+        };
+      }
+    );
     return NextResponse.json(
-      { accounts, pumpCashback },
+      { accounts, excess, pumpCashback },
       {
         headers: {
           ...rateLimitHeaders(limited, LIMIT),

@@ -31,9 +31,9 @@ export function Hero() {
         </h1>
 
         <p className="mx-auto mt-5 max-w-2xl px-1 text-lg text-[var(--muted)] sm:mt-6 sm:text-xl">
-          Every token you ever received locked ~0.002 SOL as rent. When the
-          account is empty, that SOL just sits there — close the accounts and
-          get it back. Scanning is free and read-only.
+          Every token you ever received locked SOL as rent. When the account
+          is empty — or when the network lowers the rent floor — reclaim that
+          SOL. Scanning is free and read-only.
         </p>
 
         <div className="mt-7 flex flex-col items-center gap-3 sm:mt-8">

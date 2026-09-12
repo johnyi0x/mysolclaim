@@ -12,7 +12,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Where does the reclaimed SOL come from?",
     answer:
-      "Every time you receive a new token, your wallet creates a token account for it and deposits about 0.002 SOL as 'rent' to keep that account on-chain. When you later sell or send the full balance, the account sits empty — but the deposit stays locked inside it. Closing the empty account refunds that deposit straight back to your wallet.",
+      "Every time you receive a new token, your wallet creates a token account and deposits SOL as rent to keep that account on-chain. When you sell or send the full balance, closing the empty account refunds that deposit. Separately, when Solana lowers the network rent floor (SIMD-0437), accounts funded at the old higher rate hold surplus SOL — we withdraw only that excess with WithdrawExcessLamports without closing the account or touching your tokens.",
   },
   {
     question: "What is the fee and how is it taken?",

@@ -12,13 +12,21 @@ import {
   type PumpCashbackOpportunity,
 } from "./pump-cashback";
 import { splitServiceFee } from "./referral";
-import type { EmptyTokenAccount } from "./scan";
+import {
+  createWithdrawExcessLamportsInstruction,
+  type EmptyTokenAccount,
+  type ExcessRentAccount,
+} from "./scan";
 
-export type ClaimActionType = "vacant_account" | "pump_cashback";
+export type ClaimActionType =
+  | "vacant_account"
+  | "excess_rent"
+  | "pump_cashback";
 
 export interface ClaimBatch {
   transaction: Transaction;
   accounts: EmptyTokenAccount[];
+  excessAccounts: ExcessRentAccount[];
   /** Total rent / reclaimable (lamports) refunded to the user by this batch. */
   rentLamports: number;
   /** Total service fee (platform + referrer cuts). */
@@ -29,6 +37,9 @@ export interface ClaimBatch {
   blockhash: string;
   lastValidBlockHeight: number;
 }
+
+/** Excess withdraw ixs are tiny — pack more per tx than closes. */
+export const EXCESS_PER_TX = 24;
 
 export function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -90,7 +101,6 @@ async function appendFeeTransfer(
     );
   }
 
-  // Until platform fee wallet is rent-safe, skip referral split (all → platform).
   const useReferrer = Boolean(referrer && feeWalletReady);
 
   let { platformLamports, referrerLamports } = splitServiceFee(
@@ -98,8 +108,6 @@ async function appendFeeTransfer(
     useReferrer
   );
 
-  // If referrer wallet is missing / under-rented and cut is too small to create it,
-  // skip referral this tx (avoid InsufficientFundsForRent) — all fee → platform.
   if (referrer && referrerLamports > 0) {
     try {
       const refInfo = await connection.getAccountInfo(referrer, "confirmed");
@@ -114,7 +122,7 @@ async function appendFeeTransfer(
         }
       }
     } catch {
-      // If we cannot read referrer, still attempt the tip (wallet usually exists).
+      // still attempt tip
     }
   }
 
@@ -188,6 +196,7 @@ export async function buildPumpCashbackTransaction(
   return {
     transaction: tx,
     accounts: [],
+    excessAccounts: [],
     rentLamports: opportunity.lamports,
     feeLamports: fees.totalFee,
     platformFeeLamports: fees.platformFee,
@@ -257,11 +266,86 @@ export async function buildClaimTransactions(
     results.push({
       transaction: tx,
       accounts,
+      excessAccounts: [],
       rentLamports,
       feeLamports: fees.totalFee,
       platformFeeLamports: fees.platformFee,
       referrerFeeLamports: fees.referrerFee,
       action: "vacant_account",
+      blockhash,
+      lastValidBlockHeight,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Withdraw excess lamports above the current rent floor (SIMD-0437).
+ * Account stays open; token balances untouched.
+ */
+export async function buildExcessRentTransactions(
+  connection: Connection,
+  user: PublicKey,
+  selected: ExcessRentAccount[],
+  referrer: PublicKey | null = null
+): Promise<ClaimBatch[]> {
+  if (!FEE_WALLET && FEE_PERCENT > 0) {
+    throw new Error(
+      "Fee wallet is not configured. Refusing to build claim transactions."
+    );
+  }
+
+  const batches = chunk(selected, EXCESS_PER_TX);
+  const results: ClaimBatch[] = [];
+
+  for (const excessAccounts of batches) {
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash("confirmed");
+
+    const tx = new Transaction({
+      feePayer: user,
+      blockhash,
+      lastValidBlockHeight,
+    });
+
+    tx.add(
+      ComputeBudgetProgram.setComputeUnitLimit({
+        units: Math.max(40_000, 12_000 * excessAccounts.length + 20_000),
+      }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
+    );
+
+    let reclaimLamports = 0;
+    for (const acc of excessAccounts) {
+      reclaimLamports += acc.excessLamports;
+      tx.add(
+        createWithdrawExcessLamportsInstruction(
+          new PublicKey(acc.address),
+          user,
+          user,
+          new PublicKey(acc.programId)
+        )
+      );
+    }
+
+    const fees = await appendFeeTransfer(
+      connection,
+      tx,
+      user,
+      reclaimLamports,
+      referrer
+    );
+
+    results.push({
+      transaction: tx,
+      accounts: [],
+      excessAccounts,
+      rentLamports: reclaimLamports,
+      feeLamports: fees.totalFee,
+      platformFeeLamports: fees.platformFee,
+      referrerFeeLamports: fees.referrerFee,
+      action: "excess_rent",
       blockhash,
       lastValidBlockHeight,
     });
