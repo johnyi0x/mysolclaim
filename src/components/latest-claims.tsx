@@ -12,7 +12,9 @@ import { useLedger } from "@/lib/use-ledger";
 function actionLabel(action: ClaimActionType): string {
   switch (action) {
     case "pump_cashback":
-      return "Pump.fun Cashback";
+      return "Pump Cashback";
+    case "pump_usdc":
+      return "Pump USDC";
     case "excess_rent":
       return "Excess Rent";
     case "burn_token":

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
 import { findTokenReclaimOpportunities } from "@/lib/scan";
-import { findPumpCashback } from "@/lib/pump-cashback";
+import { findPumpReclaim } from "@/lib/pump-cashback";
 import {
   clientKey,
   isAllowedOrigin,
@@ -17,7 +17,8 @@ const LIMIT = 8;
 const WINDOW_MS = 60_000;
 
 /**
- * Rate-limited reclaim scan: vacant closes + excess rent + Pump cashback.
+ * Rate-limited reclaim scan:
+ * vacant closes + excess rent + Pump bonding/AMM cashback (SOL + USDC).
  * Public Solana RPC first, then HELIUS_RPC_URL if configured.
  */
 export async function GET(req: Request) {
@@ -72,28 +73,25 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { accounts, excess, pumpCashback } = await withRpcFallback(
-      async (connection) => {
-        const [tokenScan, pumpCashback] = await Promise.all([
-          findTokenReclaimOpportunities(connection, owner),
-          findPumpCashback(connection, owner),
-        ]);
-        return {
-          accounts: tokenScan.accounts,
-          excess: tokenScan.excess,
-          pumpCashback,
-        };
-      }
-    );
-    return NextResponse.json(
-      { accounts, excess, pumpCashback },
-      {
-        headers: {
-          ...rateLimitHeaders(limited, LIMIT),
-          "Cache-Control": "private, no-store",
-        },
-      }
-    );
+    const body = await withRpcFallback(async (connection) => {
+      const [tokenScan, pump] = await Promise.all([
+        findTokenReclaimOpportunities(connection, owner),
+        findPumpReclaim(connection, owner),
+      ]);
+      return {
+        accounts: tokenScan.accounts,
+        excess: tokenScan.excess,
+        pump,
+        // backward-compatible alias for older clients
+        pumpCashback: pump.bondingSol,
+      };
+    });
+    return NextResponse.json(body, {
+      headers: {
+        ...rateLimitHeaders(limited, LIMIT),
+        "Cache-Control": "private, no-store",
+      },
+    });
   } catch (err) {
     console.error("scan failed:", err);
     return NextResponse.json(

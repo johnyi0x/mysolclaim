@@ -171,14 +171,21 @@ export async function findTokenReclaimOpportunities(
   ];
 
   const spaces: number[] = [];
-  for (const [accounts] of scanned) {
+  for (const [accounts, programId] of scanned) {
     for (const { account } of accounts) {
-      const space =
+      const spaceRaw =
         typeof account.data === "object" &&
         account.data !== null &&
         "space" in account.data
           ? Number((account.data as { space?: number }).space ?? 0)
           : 0;
+      // Classic SPL token accounts are 165 bytes; some RPC payloads omit `space`.
+      const space =
+        spaceRaw > 0
+          ? spaceRaw
+          : programId.equals(TOKEN_PROGRAM_ID)
+            ? 165
+            : 0;
       if (space > 0) spaces.push(space);
     }
   }
@@ -195,12 +202,18 @@ export async function findTokenReclaimOpportunities(
         | undefined;
       if (!parsed) continue;
 
-      const space =
+      const spaceRaw =
         typeof account.data === "object" &&
         account.data !== null &&
         "space" in account.data
           ? Number((account.data as { space?: number }).space ?? 0)
           : 0;
+      const space =
+        spaceRaw > 0
+          ? spaceRaw
+          : programId.equals(TOKEN_PROGRAM_ID)
+            ? 165
+            : 0;
 
       const vacantItem = inspectVacant(
         owner,
@@ -218,7 +231,9 @@ export async function findTokenReclaimOpportunities(
       // WithdrawExcessLamports does not support wrapped-SOL accounts.
       if (isNativeTokenAccount(parsed)) continue;
 
-      const rentExempt = floors.get(space) ?? 0;
+      const rentExempt =
+        floors.get(space) ??
+        (space > 0 ? (128 + space) * 5_080 : 0);
       if (rentExempt <= 0) continue;
       const excessLamports = account.lamports - rentExempt;
       if (excessLamports < MIN_EXCESS_LAMPORTS) continue;

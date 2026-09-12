@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
+  buildAmmWsolTransaction,
+  buildBondingSolTransaction,
   buildClaimTransactions,
   buildExcessRentTransactions,
-  buildPumpCashbackTransaction,
+  buildUsdcCashbackTransaction,
   computeFee,
   EXCESS_PER_TX,
   type ClaimBatch,
@@ -19,7 +21,11 @@ import {
   SOLSCAN_TX,
 } from "@/lib/constants";
 import { formatSol, truncateAddress } from "@/lib/format";
-import type { PumpCashbackOpportunity } from "@/lib/pump-cashback";
+import {
+  pumpSolReclaimable,
+  pumpUsdcReclaimable,
+  type PumpReclaimScan,
+} from "@/lib/pump-cashback";
 import { getStoredReferrer } from "@/lib/referral";
 import { fetchEffectiveReferrer } from "@/lib/resolve-referrer";
 import type { EmptyTokenAccount, ExcessRentAccount } from "@/lib/scan";
@@ -31,9 +37,18 @@ interface BatchResult {
   closedAddresses: string[];
   excessAddresses: string[];
   rentLamports: number;
+  usdcRaw: number;
   feeLamports: number;
-  action: "vacant_account" | "excess_rent" | "pump_cashback";
+  usdcFeeRaw: number;
+  action: "vacant_account" | "excess_rent" | "pump_cashback" | "pump_usdc";
 }
+
+const EMPTY_PUMP: PumpReclaimScan = {
+  bondingSol: null,
+  ammWsol: null,
+  ammUsdc: null,
+  bondingUsdc: null,
+};
 
 type Phase = "idle" | "claiming" | "done";
 
@@ -49,9 +64,9 @@ export function Dashboard() {
   const [excessAccounts, setExcessAccounts] = useState<ExcessRentAccount[]>(
     []
   );
-  const [pumpCashback, setPumpCashback] =
-    useState<PumpCashbackOpportunity | null>(null);
-  const [includePump, setIncludePump] = useState(true);
+  const [pump, setPump] = useState<PumpReclaimScan>(EMPTY_PUMP);
+  const [includePumpSol, setIncludePumpSol] = useState(true);
+  const [includePumpUsdc, setIncludePumpUsdc] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -64,21 +79,21 @@ export function Dashboard() {
   const [referralActive, setReferralActive] = useState(false);
   const lastScanAt = useRef(0);
   const postClaimRescanRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Addresses confirmed closed this session — filter every scan result through this. */
   const confirmedClosedRef = useRef<Set<string>>(new Set());
-  /** Excess-rent addresses already withdrawn this session. */
   const confirmedExcessRef = useRef<Set<string>>(new Set());
-  /** Whether pump cashback was confirmed claimed this session. */
-  const confirmedPumpRef = useRef(false);
+  const confirmedPumpSolRef = useRef(false);
+  const confirmedPumpUsdcRef = useRef(false);
 
   const clearClaimedFromUi = useCallback((completed: BatchResult[]) => {
     const closed = new Set(completed.flatMap((r) => r.closedAddresses));
     const excessDone = new Set(completed.flatMap((r) => r.excessAddresses));
-    const claimedPump = completed.some((r) => r.action === "pump_cashback");
+    const claimedPumpSol = completed.some((r) => r.action === "pump_cashback");
+    const claimedPumpUsdc = completed.some((r) => r.action === "pump_usdc");
 
     for (const addr of closed) confirmedClosedRef.current.add(addr);
     for (const addr of excessDone) confirmedExcessRef.current.add(addr);
-    if (claimedPump) confirmedPumpRef.current = true;
+    if (claimedPumpSol) confirmedPumpSolRef.current = true;
+    if (claimedPumpUsdc) confirmedPumpUsdcRef.current = true;
 
     if (closed.size > 0) {
       setAccounts((prev) =>
@@ -102,9 +117,15 @@ export function Dashboard() {
         return next;
       });
     }
-    if (claimedPump) {
-      setPumpCashback(null);
-      setIncludePump(false);
+    if (claimedPumpSol || claimedPumpUsdc) {
+      setPump((prev) => ({
+        bondingSol: claimedPumpSol ? null : prev.bondingSol,
+        ammWsol: claimedPumpSol ? null : prev.ammWsol,
+        ammUsdc: claimedPumpUsdc ? null : prev.ammUsdc,
+        bondingUsdc: claimedPumpUsdc ? null : prev.bondingUsdc,
+      }));
+      if (claimedPumpSol) setIncludePumpSol(false);
+      if (claimedPumpUsdc) setIncludePumpUsdc(false);
     }
   }, []);
 
@@ -144,15 +165,34 @@ export function Dashboard() {
       const foundExcess = ((data.excess ?? []) as ExcessRentAccount[]).filter(
         (a) => !confirmedExcessRef.current.has(a.address)
       );
-      const pump = (data.pumpCashback ?? null) as PumpCashbackOpportunity | null;
-      // Always exclude confirmed-closed accounts regardless of RPC lag.
+      const pumpScan = (data.pump ?? {
+        bondingSol: data.pumpCashback ?? null,
+        ammWsol: null,
+        ammUsdc: null,
+        bondingUsdc: null,
+      }) as PumpReclaimScan;
+
       const vacant = found.filter(
         (a) => !confirmedClosedRef.current.has(a.address)
       );
       setAccounts(vacant);
       setExcessAccounts(foundExcess);
-      setPumpCashback(confirmedPumpRef.current ? null : pump);
-      setIncludePump(confirmedPumpRef.current ? false : Boolean(pump));
+
+      const nextPump: PumpReclaimScan = {
+        bondingSol: confirmedPumpSolRef.current ? null : pumpScan.bondingSol,
+        ammWsol: confirmedPumpSolRef.current ? null : pumpScan.ammWsol,
+        ammUsdc: confirmedPumpUsdcRef.current ? null : pumpScan.ammUsdc,
+        bondingUsdc: confirmedPumpUsdcRef.current
+          ? null
+          : pumpScan.bondingUsdc,
+      };
+      setPump(nextPump);
+      setIncludePumpSol(
+        !confirmedPumpSolRef.current && pumpSolReclaimable(nextPump) > 0
+      );
+      setIncludePumpUsdc(
+        !confirmedPumpUsdcRef.current && pumpUsdcReclaimable(nextPump) > 0
+      );
       setSelected(
         new Set(vacant.filter((a) => a.closable).map((a) => a.address))
       );
@@ -183,14 +223,15 @@ export function Dashboard() {
   useEffect(() => {
     setAccounts(null);
     setExcessAccounts([]);
-    setPumpCashback(null);
+    setPump(EMPTY_PUMP);
     setResults([]);
     setPhase("idle");
     setClaimError(null);
     lastScanAt.current = 0;
     confirmedClosedRef.current = new Set();
     confirmedExcessRef.current = new Set();
-    confirmedPumpRef.current = false;
+    confirmedPumpSolRef.current = false;
+    confirmedPumpUsdcRef.current = false;
     if (postClaimRescanRef.current) {
       clearTimeout(postClaimRescanRef.current);
       postClaimRescanRef.current = null;
@@ -222,24 +263,33 @@ export function Dashboard() {
     (n, a) => n + a.excessLamports,
     0
   );
-  const pumpLamports =
-    includePump && pumpCashback ? pumpCashback.lamports : 0;
+  const pumpSolLamports = includePumpSol ? pumpSolReclaimable(pump) : 0;
+  const pumpUsdcRaw = includePumpUsdc ? pumpUsdcReclaimable(pump) : 0;
   const totalReclaimable =
-    selectedRent + selectedExcessLamports + pumpLamports;
+    selectedRent + selectedExcessLamports + pumpSolLamports;
   const fee = FEE_WALLET ? computeFee(totalReclaimable) : 0;
+  const usdcFee = FEE_WALLET ? Math.floor((pumpUsdcRaw * FEE_PERCENT) / 100) : 0;
   const netReceive = totalReclaimable - fee;
+  const netUsdc = pumpUsdcRaw - usdcFee;
   const vacantTxCount =
     Math.ceil(selectedAccounts.length / CLOSES_PER_TX) || 0;
   const excessTxCount =
     Math.ceil(selectedExcessList.length / EXCESS_PER_TX) || 0;
-  const pumpTxCount = pumpLamports > 0 ? 1 : 0;
-  const txCount = vacantTxCount + excessTxCount + pumpTxCount;
+  const pumpSolTxCount =
+    (includePumpSol && pump.bondingSol ? 1 : 0) +
+    (includePumpSol && pump.ammWsol ? 1 : 0);
+  const pumpUsdcTxCount =
+    (includePumpUsdc && pump.ammUsdc ? 1 : 0) +
+    (includePumpUsdc && pump.bondingUsdc ? 1 : 0);
+  const txCount =
+    vacantTxCount + excessTxCount + pumpSolTxCount + pumpUsdcTxCount;
   const onCooldown = Date.now() < cooldownUntil;
   const canClaim =
-    totalReclaimable > 0 &&
+    (totalReclaimable > 0 || pumpUsdcRaw > 0) &&
     (selectedAccounts.length > 0 ||
       selectedExcessList.length > 0 ||
-      pumpLamports > 0);
+      pumpSolLamports > 0 ||
+      pumpUsdcRaw > 0);
 
   const toggle = (address: string) => {
     setSelected((prev) => {
@@ -316,7 +366,9 @@ export function Dashboard() {
       closedAddresses: batch.accounts.map((a) => a.address),
       excessAddresses: batch.excessAccounts.map((a) => a.address),
       rentLamports: batch.rentLamports,
+      usdcRaw: batch.usdcRaw,
       feeLamports: batch.feeLamports,
+      usdcFeeRaw: batch.usdcFeeRaw,
       action: batch.action,
     };
   };
@@ -336,21 +388,73 @@ export function Dashboard() {
       setProgress("Resolving referral…");
       const referrer = await fetchEffectiveReferrer(publicKey);
 
-      if (includePump && pumpCashback) {
+      if (includePumpSol && pump.bondingSol) {
         step++;
-        setProgress(`(${step}/${total}) Building Pump.fun cashback…`);
-        const batch = await buildPumpCashbackTransaction(
+        setProgress(`(${step}/${total}) Building Pump bonding cashback…`);
+        const batch = await buildBondingSolTransaction(
           connection,
           publicKey,
-          pumpCashback,
+          pump.bondingSol,
           referrer
         );
         const result = await sendBatch(
           batch,
-          "Pump.fun cashback",
+          "Pump bonding cashback",
           step,
           total
         );
+        completed.push(result);
+        setResults([...completed]);
+      }
+
+      if (includePumpSol && pump.ammWsol) {
+        step++;
+        setProgress(`(${step}/${total}) Building PumpSwap SOL cashback…`);
+        const batch = await buildAmmWsolTransaction(
+          connection,
+          publicKey,
+          pump.ammWsol,
+          referrer
+        );
+        const result = await sendBatch(
+          batch,
+          "PumpSwap SOL cashback",
+          step,
+          total
+        );
+        completed.push(result);
+        setResults([...completed]);
+      }
+
+      if (includePumpUsdc && pump.ammUsdc) {
+        step++;
+        setProgress(`(${step}/${total}) Building PumpSwap USDC cashback…`);
+        const batch = await buildUsdcCashbackTransaction(
+          connection,
+          publicKey,
+          pump.ammUsdc,
+          referrer
+        );
+        const result = await sendBatch(
+          batch,
+          "PumpSwap USDC cashback",
+          step,
+          total
+        );
+        completed.push(result);
+        setResults([...completed]);
+      }
+
+      if (includePumpUsdc && pump.bondingUsdc) {
+        step++;
+        setProgress(`(${step}/${total}) Building Pump USDC cashback…`);
+        const batch = await buildUsdcCashbackTransaction(
+          connection,
+          publicKey,
+          pump.bondingUsdc,
+          referrer
+        );
+        const result = await sendBatch(batch, "Pump USDC cashback", step, total);
         completed.push(result);
         setResults([...completed]);
       }
@@ -434,6 +538,10 @@ export function Dashboard() {
     (n, r) => n + r.rentLamports - r.feeLamports,
     0
   );
+  const totalUsdcReceived = results.reduce(
+    (n, r) => n + r.usdcRaw - r.usdcFeeRaw,
+    0
+  );
   const totalClosed = results.reduce((n, r) => n + r.accountsClosed, 0);
 
   return (
@@ -451,7 +559,16 @@ export function Dashboard() {
             You received about{" "}
             <strong className="text-[var(--accent)]">
               {formatSol(totalReceived)} SOL
-            </strong>{" "}
+            </strong>
+            {totalUsdcReceived > 0 && (
+              <>
+                {" "}
+                +{" "}
+                <strong className="text-[var(--accent)]">
+                  {(totalUsdcReceived / 1_000_000).toFixed(4)} USDC
+                </strong>
+              </>
+            )}{" "}
             (reclaimed − {FEE_PERCENT}% fee)
             {claimError ? " from the txs that succeeded." : "."}
           </p>
@@ -469,11 +586,15 @@ export function Dashboard() {
                 <span className="text-[var(--muted)]">
                   —{" "}
                   {r.action === "pump_cashback"
-                    ? "Pump.fun cashback"
-                    : r.action === "excess_rent"
-                      ? `${r.excessAddresses.length} excess rent`
-                      : `${r.accountsClosed} vacant`}
-                  , +{formatSol(r.rentLamports - r.feeLamports)} SOL
+                    ? "Pump cashback (SOL)"
+                    : r.action === "pump_usdc"
+                      ? `Pump cashback (${(r.usdcRaw / 1_000_000).toFixed(4)} USDC)`
+                      : r.action === "excess_rent"
+                        ? `${r.excessAddresses.length} excess rent`
+                        : `${r.accountsClosed} vacant`}
+                  {r.rentLamports > 0
+                    ? `, +${formatSol(r.rentLamports - r.feeLamports)} SOL`
+                    : ""}
                 </span>
               </li>
             ))}
@@ -500,12 +621,28 @@ export function Dashboard() {
             {!scanning && accounts !== null && (
               <p className="mt-2 text-2xl font-semibold text-[var(--accent)] sm:text-3xl">
                 {formatSol(netReceive)} SOL
+                {netUsdc > 0
+                  ? ` + ${(netUsdc / 1_000_000).toFixed(4)} USDC`
+                  : ""}
               </p>
             )}
-            {!scanning && accounts !== null && totalReclaimable > 0 && (
+            {!scanning &&
+              accounts !== null &&
+              (totalReclaimable > 0 || pumpUsdcRaw > 0) && (
               <p className="mt-2 text-base leading-snug text-[var(--muted)] sm:text-xl">
-                gross {formatSol(totalReclaimable)} − {FEE_PERCENT}% fee{" "}
-                {formatSol(fee)}
+                {totalReclaimable > 0 && (
+                  <>
+                    gross {formatSol(totalReclaimable)} − {FEE_PERCENT}% fee{" "}
+                    {formatSol(fee)}
+                  </>
+                )}
+                {pumpUsdcRaw > 0 && (
+                  <>
+                    {totalReclaimable > 0 ? " · " : ""}
+                    USDC {(pumpUsdcRaw / 1_000_000).toFixed(4)} − {FEE_PERCENT}%
+                    fee {(usdcFee / 1_000_000).toFixed(4)}
+                  </>
+                )}
                 {txCount > 0
                   ? ` · sign ${txCount} tx${txCount === 1 ? "" : "s"}`
                   : ""}
@@ -537,7 +674,15 @@ export function Dashboard() {
             >
               {phase === "claiming"
                 ? "Waiting…"
-                : `Claim ${canClaim ? `≈${formatSol(netReceive)}` : ""}`}
+                : `Claim ${
+                    canClaim
+                      ? `≈${formatSol(netReceive)}${
+                          netUsdc > 0
+                            ? ` +${(netUsdc / 1_000_000).toFixed(2)}U`
+                            : ""
+                        }`
+                      : ""
+                  }`}
             </button>
           </div>
         </div>
@@ -555,39 +700,67 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* Pump.fun cashback panel */}
-      {pumpCashback && (
-        <div className="mt-4 pixel-panel p-4 sm:p-5">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={includePump}
-              onChange={(e) => setIncludePump(e.target.checked)}
-              className="mt-1 h-5 w-5 shrink-0 accent-[var(--accent)]"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="font-pixel text-[9px] sm:text-[10px]">
-                  Pump.fun Cashback
-                </h2>
-                <span className="font-pixel text-[10px] text-[var(--accent)] sm:text-xs">
-                  {formatSol(pumpCashback.lamports)} SOL
-                </span>
-              </div>
-              <p className="mt-2 text-base text-[var(--muted)] sm:text-lg">
-                Claim trader cashback + close your Pump volume account (rent).
-                Same {FEE_PERCENT}% fee applies.
-              </p>
-              <a
-                href={SOLSCAN_ACCOUNT(pumpCashback.accumulator)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 inline-block text-sm text-[var(--accent)] underline"
-              >
-                Accumulator ↗
-              </a>
+      {/* Pump cashback panels */}
+      {(pumpSolReclaimable(pump) > 0 || pumpUsdcReclaimable(pump) > 0) && (
+        <div className="mt-4 space-y-3">
+          {pumpSolReclaimable(pump) > 0 && (
+            <div className="pixel-panel p-4 sm:p-5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={includePumpSol}
+                  onChange={(e) => setIncludePumpSol(e.target.checked)}
+                  className="mt-1 h-5 w-5 shrink-0 accent-[var(--accent)]"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="font-pixel text-[9px] sm:text-[10px]">
+                      Pump / PumpSwap SOL Cashback
+                    </h2>
+                    <span className="font-pixel text-[10px] text-[var(--accent)] sm:text-xs">
+                      {formatSol(pumpSolReclaimable(pump))} SOL
+                    </span>
+                  </div>
+                  <p className="mt-2 text-base text-[var(--muted)] sm:text-lg">
+                    Bonding-curve SOL
+                    {pump.bondingSol
+                      ? ` (${formatSol(pump.bondingSol.lamports)})`
+                      : ""}
+                    {pump.ammWsol
+                      ? ` · PumpSwap WSOL (${formatSol(pump.ammWsol.amount)})`
+                      : ""}
+                    . Same {FEE_PERCENT}% fee applies.
+                  </p>
+                </div>
+              </label>
             </div>
-          </label>
+          )}
+          {pumpUsdcReclaimable(pump) > 0 && (
+            <div className="pixel-panel p-4 sm:p-5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={includePumpUsdc}
+                  onChange={(e) => setIncludePumpUsdc(e.target.checked)}
+                  className="mt-1 h-5 w-5 shrink-0 accent-[var(--accent)]"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="font-pixel text-[9px] sm:text-[10px]">
+                      Pump / PumpSwap USDC Cashback
+                    </h2>
+                    <span className="font-pixel text-[10px] text-[var(--accent)] sm:text-xs">
+                      {(pumpUsdcReclaimable(pump) / 1_000_000).toFixed(4)} USDC
+                    </span>
+                  </div>
+                  <p className="mt-2 text-base text-[var(--muted)] sm:text-lg">
+                    Claims USDC trader cashback to your wallet. {FEE_PERCENT}%
+                    fee taken in USDC (+ tiny SOL tip for ledger).
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
         </div>
       )}
 

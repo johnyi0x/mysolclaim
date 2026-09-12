@@ -8,8 +8,12 @@ import {
 import { createCloseAccountInstruction } from "@solana/spl-token";
 import { CLOSES_PER_TX, FEE_PERCENT, FEE_WALLET } from "./constants";
 import {
-  buildPumpCashbackInstructions,
-  type PumpCashbackOpportunity,
+  buildAmmWsolInstructions,
+  buildBondingSolInstructions,
+  buildUsdcCashbackInstructions,
+  buildUsdcFeeTransfers,
+  type PumpBondingSolOpportunity,
+  type PumpTokenCashbackOpportunity,
 } from "./pump-cashback";
 import { splitServiceFee } from "./referral";
 import {
@@ -21,18 +25,22 @@ import {
 export type ClaimActionType =
   | "vacant_account"
   | "excess_rent"
-  | "pump_cashback";
+  | "pump_cashback"
+  | "pump_usdc";
 
 export interface ClaimBatch {
   transaction: Transaction;
   accounts: EmptyTokenAccount[];
   excessAccounts: ExcessRentAccount[];
-  /** Total rent / reclaimable (lamports) refunded to the user by this batch. */
+  /** Total SOL reclaimable (lamports) for fee math / UI. */
   rentLamports: number;
-  /** Total service fee (platform + referrer cuts). */
+  /** USDC raw amount claimed in this batch (0 if none). */
+  usdcRaw: number;
+  /** Total service fee in SOL lamports (platform + referrer). */
   feeLamports: number;
   platformFeeLamports: number;
   referrerFeeLamports: number;
+  usdcFeeRaw: number;
   action: ClaimActionType;
   blockhash: string;
   lastValidBlockHeight: number;
@@ -153,10 +161,10 @@ async function appendFeeTransfer(
   };
 }
 
-export async function buildPumpCashbackTransaction(
+export async function buildBondingSolTransaction(
   connection: Connection,
   user: PublicKey,
-  opportunity: PumpCashbackOpportunity,
+  opportunity: PumpBondingSolOpportunity,
   referrer: PublicKey | null = null
 ): Promise<ClaimBatch> {
   if (!FEE_WALLET && FEE_PERCENT > 0) {
@@ -175,13 +183,11 @@ export async function buildPumpCashbackTransaction(
   });
 
   tx.add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 120_000 }),
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
   );
 
-  for (const ix of buildPumpCashbackInstructions(user, {
-    cashbackLamports: opportunity.cashbackLamports,
-  })) {
+  for (const ix of buildBondingSolInstructions(user, opportunity)) {
     tx.add(ix);
   }
 
@@ -198,13 +204,154 @@ export async function buildPumpCashbackTransaction(
     accounts: [],
     excessAccounts: [],
     rentLamports: opportunity.lamports,
+    usdcRaw: 0,
     feeLamports: fees.totalFee,
     platformFeeLamports: fees.platformFee,
     referrerFeeLamports: fees.referrerFee,
+    usdcFeeRaw: 0,
     action: "pump_cashback",
     blockhash,
     lastValidBlockHeight,
   };
+}
+
+/** PumpSwap WSOL cashback → unwrap to native SOL + SOL fee. */
+export async function buildAmmWsolTransaction(
+  connection: Connection,
+  user: PublicKey,
+  opportunity: PumpTokenCashbackOpportunity,
+  referrer: PublicKey | null = null
+): Promise<ClaimBatch> {
+  if (!FEE_WALLET && FEE_PERCENT > 0) {
+    throw new Error(
+      "Fee wallet is not configured. Refusing to build claim transactions."
+    );
+  }
+
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
+
+  const tx = new Transaction({
+    feePayer: user,
+    blockhash,
+    lastValidBlockHeight,
+  });
+
+  tx.add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 150_000 }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
+  );
+
+  for (const ix of buildAmmWsolInstructions(user, opportunity)) {
+    tx.add(ix);
+  }
+
+  const fees = await appendFeeTransfer(
+    connection,
+    tx,
+    user,
+    opportunity.amount,
+    referrer
+  );
+
+  return {
+    transaction: tx,
+    accounts: [],
+    excessAccounts: [],
+    rentLamports: opportunity.amount,
+    usdcRaw: 0,
+    feeLamports: fees.totalFee,
+    platformFeeLamports: fees.platformFee,
+    referrerFeeLamports: fees.referrerFee,
+    usdcFeeRaw: 0,
+    action: "pump_cashback",
+    blockhash,
+    lastValidBlockHeight,
+  };
+}
+
+/** USDC cashback (AMM or bonding) + USDC fee split. */
+export async function buildUsdcCashbackTransaction(
+  connection: Connection,
+  user: PublicKey,
+  opportunity: PumpTokenCashbackOpportunity,
+  referrer: PublicKey | null = null
+): Promise<ClaimBatch> {
+  if (!FEE_WALLET && FEE_PERCENT > 0) {
+    throw new Error(
+      "Fee wallet is not configured. Refusing to build claim transactions."
+    );
+  }
+
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
+
+  const tx = new Transaction({
+    feePayer: user,
+    blockhash,
+    lastValidBlockHeight,
+  });
+
+  tx.add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })
+  );
+
+  for (const ix of buildUsdcCashbackInstructions(user, opportunity)) {
+    tx.add(ix);
+  }
+
+  const totalFee = Math.floor((opportunity.amount * FEE_PERCENT) / 100);
+  const { platformLamports: platformFeeRaw, referrerLamports: referrerFeeRaw } =
+    splitServiceFee(totalFee, Boolean(referrer && FEE_WALLET));
+
+  if (FEE_WALLET && (platformFeeRaw > 0 || referrerFeeRaw > 0)) {
+    for (const ix of buildUsdcFeeTransfers(
+      user,
+      opportunity.amount,
+      FEE_WALLET,
+      platformFeeRaw,
+      referrer,
+      referrerFeeRaw
+    )) {
+      tx.add(ix);
+    }
+  }
+
+  // Small SOL tip so fee-wallet ledger / Neon stats still see the claim.
+  const solTipBase = 1_000_000; // 0.001 SOL notional → 10% fee = 0.0001 SOL
+  const solFees = await appendFeeTransfer(
+    connection,
+    tx,
+    user,
+    solTipBase,
+    referrer
+  );
+
+  return {
+    transaction: tx,
+    accounts: [],
+    excessAccounts: [],
+    rentLamports: 0,
+    usdcRaw: opportunity.amount,
+    feeLamports: solFees.totalFee,
+    platformFeeLamports: solFees.platformFee,
+    referrerFeeLamports: solFees.referrerFee,
+    usdcFeeRaw: platformFeeRaw + referrerFeeRaw,
+    action: "pump_usdc",
+    blockhash,
+    lastValidBlockHeight,
+  };
+}
+
+/** @deprecated Use buildBondingSolTransaction */
+export async function buildPumpCashbackTransaction(
+  connection: Connection,
+  user: PublicKey,
+  opportunity: PumpBondingSolOpportunity,
+  referrer: PublicKey | null = null
+): Promise<ClaimBatch> {
+  return buildBondingSolTransaction(connection, user, opportunity, referrer);
 }
 
 export async function buildClaimTransactions(
@@ -268,9 +415,11 @@ export async function buildClaimTransactions(
       accounts,
       excessAccounts: [],
       rentLamports,
+      usdcRaw: 0,
       feeLamports: fees.totalFee,
       platformFeeLamports: fees.platformFee,
       referrerFeeLamports: fees.referrerFee,
+      usdcFeeRaw: 0,
       action: "vacant_account",
       blockhash,
       lastValidBlockHeight,
@@ -342,9 +491,11 @@ export async function buildExcessRentTransactions(
       accounts: [],
       excessAccounts,
       rentLamports: reclaimLamports,
+      usdcRaw: 0,
       feeLamports: fees.totalFee,
       platformFeeLamports: fees.platformFee,
       referrerFeeLamports: fees.referrerFee,
+      usdcFeeRaw: 0,
       action: "excess_rent",
       blockhash,
       lastValidBlockHeight,
